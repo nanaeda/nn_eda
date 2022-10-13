@@ -6,10 +6,14 @@
 
 namespace nn_eda
 {
-  int get_bit_mask(int i)
+  class Util
   {
-    return (1 << i) - 1;
-  }
+  public:
+    static int get_bit_mask(int i)
+    {
+      return (1 << i) - 1;
+    }
+  };
 
   class Nn
   {
@@ -32,6 +36,14 @@ namespace nn_eda
       grad_os = create_zero_f2(widths);
       grad_momentum_ws = create_zero_f3(widths);
       grad_momentum_bs = create_zero_f2(widths);
+
+      for (int d = 0; d + 1 < widths.size(); ++d) {
+        for (int i = 0; i < widths[d]; ++i) {
+          for (int j = 0; j < widths[d + 1]; ++j) {
+            ws[d][i][j] = random_float(-1, 1.0) * sqrtf(6.0f / (float) (widths[d] + widths[d + 1]));
+          }
+        }
+      }
     }
 
     /**
@@ -69,13 +81,19 @@ namespace nn_eda
       }
 
       // softmax
-      float total = 0.0;
-      for (int i = 0; i < widths.back(); ++i) {
-        softmax_out[i] = expf(outs[widths.size() - 1][i]);
-        total += softmax_out[i];
-      }
-      for (int i = 0; i < widths.back(); ++i) {
-        softmax_out[i] /= total;
+      {
+        float softmax_max = outs[widths.size() - 1][0];
+        for (int i = 0; i < widths.back(); ++i) {
+          softmax_max = std::max(softmax_max, outs[widths.size() - 1][i]);
+        }
+        float total = 0.0;
+        for (int i = 0; i < widths.back(); ++i) {
+          softmax_out[i] = expf(outs[widths.size() - 1][i] - softmax_max);
+          total += softmax_out[i];
+        }
+        for (int i = 0; i < widths.back(); ++i) {
+          softmax_out[i] /= total;
+        }
       }
       return softmax_out;
     }
@@ -116,24 +134,20 @@ namespace nn_eda
       assert(v.size() == index);
     }
 
-    void train(std::vector<float> input, std::vector<float> label, double learning_rate, double decay = 0.9999)
+    void train(std::vector<float> input, std::vector<float> label, double learning_rate)
     {
-      train(std::vector<std::vector<float>>({input}), std::vector<std::vector<float>>({label}), learning_rate, decay);
+      train(std::vector<std::vector<float>>({input}), std::vector<std::vector<float>>({label}), learning_rate);
     }
 
-    void train(std::vector<std::vector<float>> inputs, std::vector<std::vector<float>> labels, double learning_rate, double decay = 0.9999)
+    void train(std::vector<std::vector<float>> inputs, std::vector<std::vector<float>> labels, double learning_rate)
     {
       for (int d = 0; d < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
-          grad_bs[d][i] = 0;
-          grad_os[d][i] = 0;
-        }
+        memset(grad_bs[d], 0, sizeof(float) * widths[d]);
+        memset(grad_os[d], 0, sizeof(float) * widths[d]);
       }
       for (int d = 0; d + 1 < widths.size(); ++d) {
         for (int i = 0; i < widths[d]; ++i) {
-          for (int j = 0; j < widths[d + 1]; ++j) {
-            grad_ws[d][i][j] = 0;
-          }
+          memset(grad_ws[d][i], 0, sizeof(float) * widths[d + 1]);
         }
       }
 
@@ -151,28 +165,24 @@ namespace nn_eda
         for (int d = widths.size() - 2; 0 <= d; --d) {
           for (int i = 0; i < widths[d]; ++i) {
             grad_os[d][i] = 0;
+            bool relu_applied = (d + 1) < (widths.size() - 1);
             for (int j = 0; j < widths[d + 1]; ++j) {
-              if ((d + 1 < widths.size() - 1) && (outs[d + 1][j] == 0)) continue;
+              if (relu_applied && (outs[d + 1][j] == 0)) continue;
               grad_os[d][i] += grad_os[d + 1][j] * ws[d][i][j];
             }
           }
         }
 
         // grad of parameters
-        for (int d = 1; d < widths.size(); ++d) {
-          for (int i = 0; i < widths[d]; ++i) {
-            if (d == widths.size() - 1 || 0 < outs[d][i]) {
-              grad_bs[d][i] += grad_os[d][i];
+        for (int d = 1; d < widths.size(); ++d){
+          for (int i = 0; i < widths[d]; ++i){
+            if ((d + 1 < widths.size()) && outs[d][i] <= 0){
+              assert(outs[d][i] == 0);
+              continue;
             }
-          }
-        }
-
-        for (int d = 0; d < widths.size() - 1; ++d) {
-          for (int i = 0; i < widths[d]; ++i) {
-            for (int j = 0; j < widths[d + 1]; ++j) {
-              if (d == widths.size() - 1 || 0 < outs[d + 1][j]) {
-                grad_ws[d][i][j] += grad_os[d + 1][j] * outs[d][i];
-              }
+            grad_bs[d][i] += grad_os[d][i];
+            for (int j = 0; j < widths[d - 1]; ++j) {
+              grad_ws[d - 1][j][i] += grad_os[d][i] * outs[d - 1][j];
             }
           }
         }
@@ -180,21 +190,20 @@ namespace nn_eda
 
       double norm = 1.0 / inputs.size();
       double momentum = 0.9;
+      double decay = 1e-4;
       for (int d = 0; d < widths.size(); ++d) {
         for (int i = 0; i < widths[d]; ++i) {
-          float &f = grad_momentum_bs[d][i];
-          f = f * momentum + grad_bs[d][i] * norm;
-          bs[d][i] -= f * learning_rate;
-          bs[d][i] *= decay;
+          float &g = grad_momentum_bs[d][i];
+          g = (momentum * g + (grad_bs[d][i] * norm) + decay * bs[d][i]);
+          bs[d][i] -= learning_rate * g;
         }
       }
       for (int d = 0; d + 1 < widths.size(); ++d) {
         for (int i = 0; i < widths[d]; ++i) {
           for (int j = 0; j < widths[d + 1]; ++j) {
-            float &f = grad_momentum_ws[d][i][j];
-            f = f * momentum + grad_ws[d][i][j] * norm;
-            ws[d][i][j] -= f * learning_rate;
-            ws[d][i][j] *= decay;
+            float &g = grad_momentum_ws[d][i][j];
+            g = (momentum * g + (grad_ws[d][i][j] * norm) + decay * ws[d][i][j]);
+            ws[d][i][j] -= learning_rate * g;
           }
         }
       }
@@ -239,9 +248,7 @@ namespace nn_eda
         for (int j = 0; j < widths[i]; ++j) {
           int width8 = increment8(widths[i + 1]);
           ws[i][j] = new float[width8];
-          for (int k = 0; k < width8; ++k) {
-            ws[i][j][k] = random_float(-1, 1.0) * sqrtf(6.0f / (float) (widths[i] + widths[i + 1]));
-          }
+          memset(ws[i][j], 0, sizeof(float) * width8);
         }
       }
       return ws;
@@ -358,7 +365,7 @@ namespace nn_eda
     {
       assert(k_bits <= 16); // to avoid overflow.
 
-      int mask_k = get_bit_mask(k_bits);
+      int mask_k = Util::get_bit_mask(k_bits);
       std::vector<int> char16s;
 
       // k_bits
@@ -407,7 +414,7 @@ namespace nn_eda
     {
       std::vector<int> res;
 
-      int curr_mask = get_bit_mask(curr_base_bits);
+      int curr_mask = Util::get_bit_mask(curr_base_bits);
       int cur = 0;
       int num_bits = 0;
       for (int i: v) {
@@ -512,6 +519,20 @@ namespace nn_eda
       float weight_mini;
       float weight_maxi;
       int k_bits;
+
+      void write(std::string path)
+      {
+        std::ofstream ofs(path);
+        ofs << std::setprecision(20);
+        ofs << "nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(" << std::endl;
+        ofs << "std::vector<int>({";
+        for (int width: widths) ofs << width << ", ";
+        ofs << "})," << std::endl;
+        ofs << "\"" << serialized_weights << "\"," << std::endl;
+        ofs << weight_mini << "," << std::endl;
+        ofs << weight_maxi << "," << std::endl;
+        ofs << k_bits << "));" << std::endl;
+      }
     };
 
     static Nn from_obj(Obj obj) 
@@ -520,7 +541,7 @@ namespace nn_eda
 
       Scaler scaler(obj.weight_mini, obj.weight_maxi);
       std::vector<float> weights;
-      for(int w: int_weights) weights.push_back(scaler.unscale((float) w / get_bit_mask(obj.k_bits)));
+      for(int w: int_weights) weights.push_back(scaler.unscale((float) w / Util::get_bit_mask(obj.k_bits)));
 
       Nn nn(obj.widths);
       nn.import_weights(weights);
@@ -532,7 +553,7 @@ namespace nn_eda
       std::vector<float> weights = nn.export_weights();
       Scaler scaler = Scaler::create(weights);
       std::vector<int> int_weights;
-      for(float w: weights) int_weights.push_back((int) (scaler.scale(w) * get_bit_mask(k_bits) + 0.5));
+      for(float w: weights) int_weights.push_back((int) (scaler.scale(w) * Util::get_bit_mask(k_bits) + 0.5));
 
       return Obj(
         nn.widths,

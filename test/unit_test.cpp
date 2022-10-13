@@ -1,13 +1,4 @@
-#include "nn.cpp"
-
-
-#define DEBUG
-
-#ifdef DEBUG
-#define MY_ASSERT(f) { assert(f); }
-#else
-#define MY_ASSERT(f) {}
-#endif
+#include "../nn.cpp"
 
 #include <bits/stdc++.h>
 #include <random>
@@ -203,6 +194,27 @@ public:
   }
 };
 
+class NnAlwaysLabelTwoDataGenerator : NnDataGenerator
+{
+public:
+
+  vector<float> gen_input(int in_dim)
+  {
+    vector<float> v;
+    rep(i, in_dim) v.push_back(my_rand(0, 1));
+    return v;
+  }
+
+  vector<float> gen_label(vector<float> v, int out_dim)
+  {
+    assert(sz(v) == out_dim);
+
+    vector<float> res(out_dim, 0);
+    res[2] = 1;
+    return res;
+  }
+};
+
 class NnTester
 {
 public:
@@ -250,6 +262,12 @@ public:
   {
     NnOneToOneDataGenerator generator;
     test_training((NnDataGenerator*) &generator, vector<int>({25, 50, 50, 10}), -log(0.95));
+  }
+
+  static void test_always_label_two_data()
+  {
+    NnAlwaysLabelTwoDataGenerator generator;
+    test_training((NnDataGenerator*) &generator, vector<int>({25, 50, 50, 10}), -log(0.99));
   }
 
   static void test_qcut_data()
@@ -369,17 +387,23 @@ public:
   static void test()
   {
     declare_test_name("NnIoTester");
+    run_test(test_obj_creation);
     run_test(test_io);
   }
 
-  static void test_io()
+  static void test_obj_creation()
   {
     for(int k_bits = 16; 10 < k_bits; --k_bits){
       vector<int> widths({20, 50, 50, 10});
       Nn nn0(widths);
       NnIo::Obj obj = NnIo::to_obj(nn0, k_bits);
       Nn nn1 = NnIo::from_obj(obj);
+      compare_models(nn0, nn1, k_bits, widths);
+    }
+  }
 
+  static void compare_models(Nn &nn0, Nn &nn1, int k_bits, vector<int> widths)
+  {
       int n = 1000;
       double total_diff = 0.0;
       rep(loop, n){
@@ -395,7 +419,45 @@ public:
 
       debug2(k_bits, avg_diff);
       assert(avg_diff < 0.01);
+  }
+
+  class Batch 
+  {
+  public:
+    vector<vector<float>> inputs;
+    vector<vector<float>> labels;
+  };
+
+  /**
+   * Used for README.
+   */
+  static void test_io()
+  {
+    vector<Batch> data;
+    double learning_rate = 0.01;
+    int encode_bits = 10;
+    string out_path = "nn_test_export.txt";
+
+    vector<int> widths({4, 8, 8, 3});
+    nn_eda::Nn nn(widths);
+
+    for (Batch batch: data) {
+      nn.train(batch.inputs, batch.labels, learning_rate);
     }
+
+    nn_eda::NnIo::Obj io_obj = nn_eda::NnIo::to_obj(nn, encode_bits);
+    io_obj.write(out_path);
+
+    // Copy-and-pasted from ${out_path}.
+    nn_eda::Nn loaded = nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(
+      std::vector<int>({4, 8, 8, 3, }),
+      "㈪㊯㈠唧룍甙꾂揰詟嶇䣳䎂膋袷넻璘畝韢頎䍉丫楰貹龙逵熨閾閗髊鱁淃篅檔橜珦乯䴼돷汉浉楐洹跚䔉蟟练莽禾裻藻寯膏꽵蜜㤫䜕兡꽒鳕澑郈峞练孁殼訶鋶㯝㤲鼾式卲孜祩襾弌㐦䫿髖듌捫綄먂熛갹熛갹熛갹熛갹熛갹熛갹熛갹熛鸬",
+      -0.69429725408554077148,
+      0.70666879415512084961,
+      10
+    ));
+
+    compare_models(nn, loaded, encode_bits, widths);
   }
 };
 

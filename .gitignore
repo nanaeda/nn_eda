@@ -1,2 +1,7 @@
 .vscode
-nn_test
+test/codingame_nn.txt
+test/codingame_test
+test/nn_test_export.txt
+test/py_local_env
+test/pytorch_test
+test/unit_test

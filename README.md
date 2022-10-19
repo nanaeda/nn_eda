@@ -27,6 +27,8 @@ for (Batch batch: data) {
 nn_eda::NnIo::Obj io_obj = nn_eda::NnIo::to_obj(nn, encode_bits);
 io_obj.write(out_path);
 
+// A simple file IO is also supported.
+nn_eda::NnIo::write_raw(nn, raw_out_path);
 ```
 
 
@@ -43,6 +45,10 @@ nn_eda::Nn nn = nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(
   0.72993195056915283203,
   10
 ));
+
+// A simple file IO is also supported.
+nn_eda::Nn nn = NnIo::read_raw(path);
+
 
 
 // Perform inference.

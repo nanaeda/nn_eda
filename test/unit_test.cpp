@@ -220,6 +220,7 @@ class NnTester
 public:
   static void test()
   {
+    declare_test_name("NnTester");
     run_test(test_serde);
     run_test(test_max_data);
     run_test(test_one_to_one_data);
@@ -389,6 +390,17 @@ public:
     declare_test_name("NnIoTester");
     run_test(test_obj_creation);
     run_test(test_io);
+    run_test(test_raw_io);
+  }
+
+  static void test_raw_io()
+  { 
+    string path = "nn_io_test.txt";
+    vector<int> widths({20, 50, 50, 10});
+    Nn nn0(widths);
+    NnIo::write_raw(nn0, path);
+    Nn nn1 = NnIo::read_raw(path);
+    NnTester::compare_nn_outputs(nn0, nn1, widths, true);
   }
 
   static void test_obj_creation()

@@ -563,6 +563,32 @@ namespace nn_eda
         k_bits
       );
     }
+
+    static void write_raw(Nn &nn, std::string path)
+    {
+      std::ofstream ofs(path);
+      ofs << std::setprecision(20);
+      ofs << nn.widths.size() << std::endl;
+      for (int width: nn.widths) ofs << width << std::endl;
+      std::vector<float> weights = nn.export_weights();
+      for (float w: weights) ofs << w << std::endl;
+    }
+
+    static Nn read_raw(std::string path)
+    {
+      std::ifstream ifs(path);
+      int num_widths;
+      ifs >> num_widths;
+      std::vector<int> widths(num_widths);
+      for(int i = 0; i < num_widths; ++i) ifs >> widths[i];
+      Nn nn(widths);
+      std::vector<float> weights;
+      for(float weight; ifs >> weight;){
+        weights.push_back(weight);
+      }
+      nn.import_weights(weights);
+      return nn;
+    }
   };
 
 }

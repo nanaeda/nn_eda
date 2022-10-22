@@ -19,11 +19,9 @@ namespace nn_eda
   {
   public:
 
-    Nn(std::vector<int> widths, int seed = 1234)
+    Nn(std::vector<int> widths)
     {
       assert(2 <= widths.size());
-
-      srand(seed);
 
       this->widths = widths;
       this->ws = create_zero_f3(widths);
@@ -134,13 +132,18 @@ namespace nn_eda
       assert(v.size() == index);
     }
 
-    void train(std::vector<float> input, std::vector<float> label, double learning_rate)
+    double train(std::vector<float> input, std::vector<float> label, double learning_rate)
     {
-      train(std::vector<std::vector<float>>({input}), std::vector<std::vector<float>>({label}), learning_rate);
+      return train(std::vector<std::vector<float>>({input}), std::vector<std::vector<float>>({label}), learning_rate);
     }
 
-    void train(std::vector<std::vector<float>> inputs, std::vector<std::vector<float>> labels, double learning_rate)
+    double train(std::vector<std::vector<float>> inputs, std::vector<std::vector<float>> labels, double learning_rate)
     {
+      const double norm = 1.0 / inputs.size();
+      const double momentum = 0.9;
+      const double decay = 1e-4;
+      const double logloss_eps = 1e-6;
+
       for (int d = 0; d < widths.size(); ++d) {
         memset(grad_bs[d], 0, sizeof(float) * widths[d]);
         memset(grad_os[d], 0, sizeof(float) * widths[d]);
@@ -151,14 +154,19 @@ namespace nn_eda
         }
       }
 
+      double total_loss = 0.0;
       for (int input_index = 0; input_index < inputs.size(); ++input_index) {
         std::vector<float> input = inputs[input_index];
         std::vector<float> label = labels[input_index];
 
         // forward
-        forward(input);
+        float *forward_out = forward(input);
+        for (int i = 0; i < widths.back(); ++i) {
+          total_loss += label[i] * -log(std::max((float) logloss_eps, forward_out[i]));
+        }
 
         // grad of outputs.
+
         for (int i = 0; i < widths.back(); ++i) {
           grad_os[widths.size() - 1][i] = softmax_out[i] - label[i];
         }
@@ -188,9 +196,6 @@ namespace nn_eda
         }
       }
 
-      double norm = 1.0 / inputs.size();
-      double momentum = 0.9;
-      double decay = 1e-4;
       for (int d = 0; d < widths.size(); ++d) {
         for (int i = 0; i < widths[d]; ++i) {
           float &g = grad_momentum_bs[d][i];
@@ -207,6 +212,8 @@ namespace nn_eda
           }
         }
       }
+
+      return total_loss / inputs.size();
     }
 
     ~Nn()

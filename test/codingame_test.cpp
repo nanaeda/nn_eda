@@ -55,6 +55,7 @@ double validate_model(Nn &nn, int dim, int n)
 
 Nn train_model(int dim)
 {
+  srand(1234);
   Nn nn(vector<int>({dim, dim * 5, dim * 5, dim}));
   int num_epochs = 10;
   int batch_size = 16;

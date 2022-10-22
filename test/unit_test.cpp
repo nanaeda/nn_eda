@@ -229,10 +229,11 @@ public:
 
   static void test_serde()
   {
-    srand(1234);
     vector<int> widths({23, 45, 67, 89});
-    Nn nn0(widths, 345);
-    Nn nn1(widths, 678);
+    srand(345);
+    Nn nn0(widths);
+    srand(678);
+    Nn nn1(widths);
     compare_nn_outputs(nn0, nn0, widths, true);
     compare_nn_outputs(nn1, nn1, widths, true);
 
@@ -463,9 +464,9 @@ public:
     // Copy-and-pasted from ${out_path}.
     nn_eda::Nn loaded = nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(
       std::vector<int>({4, 8, 8, 3, }),
-      "㈪㊯㈠唧룍甙꾂揰詟嶇䣳䎂膋袷넻璘畝韢頎䍉丫楰貹龙逵熨閾閗髊鱁淃篅檔橜珦乯䴼돷汉浉楐洹跚䔉蟟练莽禾裻藻寯膏꽵蜜㤫䜕兡꽒鳕澑郈峞练孁殼訶鋶㯝㤲鼾式卲孜祩襾弌㐦䫿髖듌捫綄먂熛갹熛갹熛갹熛갹熛갹熛갹熛갹熛鸬",
-      -0.69429725408554077148,
-      0.70666879415512084961,
+      "㈪㊯㈠傷話啹년升뫆볮䄝麜맀亴蘫됧郄珩漲逫㥈籋非鸳䢠鶛檯膢㖗踁珤焝㦚抢缗憠們댤濄叆侣듬垖婕鑉鼲淞끵瓚髜寅奉册俗䲐戠卞鍿忓两띨燄烆鎰憤廨隮埉楻붶罦巌㌷仑粆齜茉㰉薇湺蒾跪柣琜瀻琜瀻琜瀻琜瀻琜瀻琜瀻琜瀻琜測",
+      -0.73765462636947631836,
+      0.69456773996353149414,
       10
     ));
 

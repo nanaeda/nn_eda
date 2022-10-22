@@ -564,33 +564,36 @@ namespace nn_eda
       );
     }
 
+
     static void write_raw(Nn &nn, std::string path)
     {
-      std::ofstream ofs(path);
-      ofs << std::setprecision(20);
-      ofs << nn.widths.size() << std::endl;
-      for (int width: nn.widths) ofs << width << std::endl;
+      std::ofstream ofs(path, std::ios::binary);
+      int num_widths = nn.widths.size();
+      ofs.write(reinterpret_cast<const char*>(&num_widths), sizeof(int));
+      for (int width: nn.widths) ofs.write(reinterpret_cast<const char*>(&width), sizeof(int));
+
       std::vector<float> weights = nn.export_weights();
-      for (float w: weights) ofs << w << std::endl;
+      int num_weights = weights.size();
+      ofs.write(reinterpret_cast<const char*>(&num_weights), sizeof(int));
+      for (float w: weights) ofs.write(reinterpret_cast<const char*>(&w), sizeof(float));
     }
 
     static Nn read_raw(std::string path)
     {
-      std::ifstream ifs(path);
+      std::ifstream ifs(path, std::ios::binary);
       int num_widths;
-      ifs >> num_widths;
+      ifs.read(reinterpret_cast<char*>(&num_widths), sizeof(int));
       std::vector<int> widths(num_widths);
-      for(int i = 0; i < num_widths; ++i) ifs >> widths[i];
+      for(int i = 0; i < num_widths; ++i) ifs.read(reinterpret_cast<char*>(&widths[i]), sizeof(int));
+
       Nn nn(widths);
-      std::vector<float> weights;
-      for(float weight; ifs >> weight;){
-        weights.push_back(weight);
-      }
+
+      int num_weights;
+      ifs.read(reinterpret_cast<char*>(&num_weights), sizeof(int));
+      std::vector<float> weights(num_weights);
+      for(int i = 0; i < num_weights; ++i) ifs.read(reinterpret_cast<char*>(&weights[i]), sizeof(float));
       nn.import_weights(weights);
       return nn;
     }
   };
-
 }
-
-

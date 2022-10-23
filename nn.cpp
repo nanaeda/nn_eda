@@ -132,12 +132,23 @@ namespace nn_eda
       assert(v.size() == index);
     }
 
-    double train(std::vector<float> input, std::vector<float> label, double learning_rate)
-    {
-      return train(std::vector<std::vector<float>>({input}), std::vector<std::vector<float>>({label}), learning_rate);
-    }
 
     double train(std::vector<std::vector<float>> inputs, std::vector<std::vector<float>> labels, double learning_rate)
+    {
+      return train(inputs, labels, std::vector<float>(), std::vector<int>(), learning_rate, false);
+    }
+
+    void train_policy_gradient(std::vector<std::vector<float>> inputs, std::vector<float> rewards, std::vector<int> action_indexes, double learning_rate)
+    {
+      train(inputs, std::vector<std::vector<float>>(), rewards, action_indexes, learning_rate, true);
+    }
+
+    double train(std::vector<std::vector<float>> inputs, 
+                 std::vector<std::vector<float>> labels, 
+                 std::vector<float> rewards,
+                 std::vector<int> action_indexes,
+                 double learning_rate, 
+                 bool is_policy_gradient)
     {
       const double norm = 1.0 / inputs.size();
       const double momentum = 0.9;
@@ -157,18 +168,23 @@ namespace nn_eda
       double total_loss = 0.0;
       for (int input_index = 0; input_index < inputs.size(); ++input_index) {
         std::vector<float> input = inputs[input_index];
-        std::vector<float> label = labels[input_index];
 
         // forward
         float *forward_out = forward(input);
-        for (int i = 0; i < widths.back(); ++i) {
-          total_loss += label[i] * -log(std::max((float) logloss_eps, forward_out[i]));
-        }
 
         // grad of outputs.
-
-        for (int i = 0; i < widths.back(); ++i) {
-          grad_os[widths.size() - 1][i] = softmax_out[i] - label[i];
+        if(is_policy_gradient){
+          for (int i = 0; i < widths.back(); ++i) {
+            grad_os[widths.size() - 1][i] = rewards[input_index] * (softmax_out[i] - (i == action_indexes[input_index] ? 1 : 0));
+          }
+        }else{
+          std::vector<float> label = labels[input_index];
+          for (int i = 0; i < widths.back(); ++i) {
+            total_loss += label[i] * -log(std::max((float) logloss_eps, forward_out[i]));
+          }
+          for (int i = 0; i < widths.back(); ++i) {
+            grad_os[widths.size() - 1][i] = softmax_out[i] - label[i];
+          }
         }
         for (int d = widths.size() - 2; 0 <= d; --d) {
           for (int i = 0; i < widths[d]; ++i) {

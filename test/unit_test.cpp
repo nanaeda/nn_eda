@@ -48,6 +48,13 @@ float my_rand(float mini, float maxi)
   return mini + (maxi - mini) * f;
 }
 
+float random_float(float mini, float maxi)
+{
+  int mask = (1 << 25) - 1;
+  float f = ((float) (rand() & mask)) / mask;
+  return mini + (maxi - mini) * f;
+}
+
 class ScalerTester
 {
 public:
@@ -222,9 +229,72 @@ public:
   {
     declare_test_name("NnTester");
     run_test(test_serde);
+    run_test(test_policy_gradient);
     run_test(test_max_data);
     run_test(test_one_to_one_data);
     run_test(test_qcut_data);
+  }
+
+  static void test_policy_gradient()
+  {
+    srand(1234);
+    int num_epochs = 100;
+    int num_data = 128;
+    int num_trains = 64;
+    int batch_size = 32;
+    int max_length = 1000;
+    double learning_rate = 1e-2;
+
+    Nn nn(vector<int>({5, 30, 30, 6}));
+    rep(epoch, num_epochs){
+      vector<vector<pair<int, int>>> dat;
+      int total_steps = 0;
+      rep(data_i, num_data){
+        vector<pair<int, int>> hist;
+        for(int loop = 0, cur = 0; loop < max_length && cur < 5; ++loop){
+          vector<float> v(5, 0);
+          v[cur] = 1.0;
+          float *scores = nn.forward(v);
+          float rem = random_float(0, 0.99999);
+          int t = 0;
+          while(t < 6){
+            rem -= scores[t];
+            if(rem <= 0) break;
+            ++t;
+          }
+          if(0 <= rem) debug(rem);
+          if(!(rem <= 0)) debug(rem);
+          assert(rem <= 0);
+          if(random_float(0, 1) < 0.05) t = rand() % 6;
+
+          hist.push_back(make_pair(cur, t));
+          if(t <= cur + 1) cur = t;
+          else cur = max(0, cur - 1);
+        }
+        total_steps += sz(hist);
+        dat.push_back(hist);
+      }
+      debug(total_steps / num_data);
+      if(epoch + 1 == num_epochs) assert(total_steps / num_data < 10.0);
+
+      rep(train_i, num_trains){
+        vector<vector<float>> inputs;
+        vector<float> rewards;
+        vector<int> action_indexes;
+        rep(batch_i, batch_size){
+          vector<pair<int, int>> &v = dat[rand() % sz(dat)];
+          int t = rand() % sz(v);
+          double reward = (sz(v) == max_length) ? -1 : 1;
+
+          vector<float> input(5, 0);
+          input[v[t].first] = 1.0;
+          inputs.push_back(input);
+          rewards.push_back(reward * pow(0.99, sz(v) - t));
+          action_indexes.push_back(v[t].second);
+        }
+        nn.train_policy_gradient(inputs, rewards, action_indexes, learning_rate);
+      }
+    }
   }
 
   static void test_serde()

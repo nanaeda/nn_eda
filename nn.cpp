@@ -6,20 +6,15 @@
 
 namespace nn_eda
 {
-  class Util
-  {
-  public:
-    static int get_bit_mask(int i)
-    {
-      return (1 << i) - 1;
-    }
-  };
+  using namespace std;
+  typedef vector<int> vi;
+  typedef vector<float> vf;
+  typedef vector<vf> vvf;
 
   class Nn
   {
   public:
-
-    Nn(std::vector<int> widths)
+    Nn(vi widths)
     {
       assert(2 <= widths.size());
 
@@ -47,7 +42,7 @@ namespace nn_eda
     /**
      * Note that this is used by the "train" method when you change this.
      */
-    float* forward(std::vector<float> &v)
+    float* forward(vf &v)
     {
       assert(widths[0] == v.size());
 
@@ -58,7 +53,7 @@ namespace nn_eda
 
         for (int i = 0; i < widths[d]; ++i) {
           float &a = outs[d][i];
-          if (0 < d) a = std::max(a, 0.0f);
+          if (0 < d) a = max(a, 0.0f);
           if (a == 0) continue;
 
           float *out_ptr = outs[d + 1];
@@ -82,7 +77,7 @@ namespace nn_eda
       {
         float softmax_max = outs[widths.size() - 1][0];
         for (int i = 0; i < widths.back(); ++i) {
-          softmax_max = std::max(softmax_max, outs[widths.size() - 1][i]);
+          softmax_max = max(softmax_max, outs[widths.size() - 1][i]);
         }
         float total = 0.0;
         for (int i = 0; i < widths.back(); ++i) {
@@ -96,9 +91,9 @@ namespace nn_eda
       return softmax_out;
     }
 
-    std::vector<float> export_weights()
+    vf export_weights()
     {
-      std::vector<float> res;
+      vf res;
       for (int d = 0; (d + 1) < widths.size(); ++d) {
         for (int i = 0; i < widths[d]; ++i) {
           for (int j = 0; j < widths[d + 1]; ++j) {
@@ -114,7 +109,7 @@ namespace nn_eda
       return res;
     }
 
-    void import_weights(std::vector<float> v)
+    void import_weights(vf v)
     {
       int index = 0;
       for (int d = 0; (d + 1) < widths.size(); ++d) {
@@ -133,20 +128,20 @@ namespace nn_eda
     }
 
 
-    double train(std::vector<std::vector<float>> inputs, std::vector<std::vector<float>> labels, double learning_rate)
+    double train(vvf inputs, vvf labels, double learning_rate)
     {
-      return train(inputs, labels, std::vector<float>(), std::vector<int>(), learning_rate, false);
+      return train(inputs, labels, vf(), vi(), learning_rate, false);
     }
 
-    void train_policy_gradient(std::vector<std::vector<float>> inputs, std::vector<float> rewards, std::vector<int> action_indexes, double learning_rate)
+    void train_policy_gradient(vvf inputs, vf rewards, vi action_indexes, double learning_rate)
     {
-      train(inputs, std::vector<std::vector<float>>(), rewards, action_indexes, learning_rate, true);
+      train(inputs, vvf(), rewards, action_indexes, learning_rate, true);
     }
 
-    double train(std::vector<std::vector<float>> inputs, 
-                 std::vector<std::vector<float>> labels, 
-                 std::vector<float> rewards,
-                 std::vector<int> action_indexes,
+    double train(vvf inputs, 
+                 vvf labels, 
+                 vf rewards,
+                 vi action_indexes,
                  double learning_rate, 
                  bool is_policy_gradient)
     {
@@ -167,7 +162,7 @@ namespace nn_eda
 
       double total_loss = 0.0;
       for (int input_index = 0; input_index < inputs.size(); ++input_index) {
-        std::vector<float> input = inputs[input_index];
+        vf input = inputs[input_index];
 
         // forward
         float *forward_out = forward(input);
@@ -178,9 +173,9 @@ namespace nn_eda
             grad_os[widths.size() - 1][i] = rewards[input_index] * (softmax_out[i] - (i == action_indexes[input_index] ? 1 : 0));
           }
         }else{
-          std::vector<float> label = labels[input_index];
+          vf label = labels[input_index];
           for (int i = 0; i < widths.back(); ++i) {
-            total_loss += label[i] * -log(std::max((float) logloss_eps, forward_out[i]));
+            total_loss += label[i] * -log(max((float) logloss_eps, forward_out[i]));
           }
           for (int i = 0; i < widths.back(); ++i) {
             grad_os[widths.size() - 1][i] = softmax_out[i] - label[i];
@@ -237,7 +232,7 @@ namespace nn_eda
       free_memory();
     }
 
-    std::vector<int> widths;
+    vi widths;
 
   private:
 
@@ -252,7 +247,7 @@ namespace nn_eda
     float ***grad_momentum_ws;
     float **grad_momentum_bs;
 
-    static float** create_zero_f2(std::vector<int> &widths)
+    static float** create_zero_f2(vi &widths)
     {
       float **a = new float*[widths.size()];
       for (int i = 0; i < widths.size(); ++i) {
@@ -263,7 +258,7 @@ namespace nn_eda
       return a;
     }
 
-    static float*** create_zero_f3(std::vector<int> &widths)
+    static float*** create_zero_f3(vi &widths)
     {
       float ***ws = new float**[widths.size() - 1];
       for (int i = 0; (i + 1) < widths.size(); ++i) {
@@ -349,13 +344,13 @@ namespace nn_eda
       return (maxi - mini) * f + mini;
     }
 
-    static Scaler create(std::vector<float> &v) 
+    static Scaler create(vf &v) 
     {
       float mini = v[0];
       float maxi = v[0];
       for (float f: v) {
-        mini = std::min(mini, f);
-        maxi = std::max(maxi, f);
+        mini = min(mini, f);
+        maxi = max(maxi, f);
       }
       return Scaler(mini, maxi);
     }
@@ -384,12 +379,12 @@ namespace nn_eda
     /**
      * All elements in "v" must be in the range of [0, 1 << k_bits).
      */
-    static std::string encode_k_bit_integer(std::vector<int> &v, int k_bits)
+    static string encode_k_bit_integer(vi &v, int k_bits)
     {
       assert(k_bits <= 16); // to avoid overflow.
 
-      int mask_k = Util::get_bit_mask(k_bits);
-      std::vector<int> char16s;
+      int mask_k = get_bit_mask(k_bits);
+      vi char16s;
 
       // k_bits
       char16s.push_back(k_bits);
@@ -401,16 +396,16 @@ namespace nn_eda
       // contents
       for (int i: convert_base(v, k_bits, 15)) char16s.push_back(i);
 
-      std::u16string u16s = to_u16string(char16s);
+      u16string u16s = to_u16string(char16s);
 
-      std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
+      wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> converter;
       return converter.to_bytes(u16s);
     }
 
-    static std::vector<int> decode(std::string &u8s)
+    static vi decode(string &u8s)
     {
-      std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
-      std::u16string u16s = converter.from_bytes(u8s);
+      wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> converter;
+      u16string u16s = converter.from_bytes(u8s);
 
       // k_bits
       int k_bits = c2i(u16s[0]);
@@ -420,10 +415,10 @@ namespace nn_eda
       int length = c2i(u16s[1]) | (c2i(u16s[2]) << 15);
       
       // contents
-      std::vector<int> v;
+      vi v;
       for (int i = 3; i < u16s.size(); ++i) v.push_back(c2i(u16s[i]));
 
-      std::vector<int> res = convert_base(v, 15, k_bits);
+      vi res = convert_base(v, 15, k_bits);
       while (length < res.size()) res.pop_back();
 
       return res;
@@ -433,11 +428,16 @@ namespace nn_eda
 
     static constexpr int MASK_15 = (1 << 15) - 1;
 
-    static std::vector<int> convert_base(std::vector<int> &v, int curr_base_bits, int next_base_bits) 
+    static int get_bit_mask(int i)
     {
-      std::vector<int> res;
+      return (1 << i) - 1;
+    }
 
-      int curr_mask = Util::get_bit_mask(curr_base_bits);
+    static vi convert_base(vi &v, int curr_base_bits, int next_base_bits) 
+    {
+      vi res;
+
+      int curr_mask = get_bit_mask(curr_base_bits);
       int cur = 0;
       int num_bits = 0;
       for (int i: v) {
@@ -463,17 +463,17 @@ namespace nn_eda
     static int fit_int(int i, int mini, int maxi) 
     {
       if (i < mini) {
-        std::cout << "Found a value out of the range. " << i << std::endl;
+        cout << "Found a value out of the range. " << i << endl;
         return mini;
       }
       if (maxi < i) {
-        std::cout << "Found a value out of the range. " << i << std::endl;
+        cout << "Found a value out of the range. " << i << endl;
         return maxi;
       }
       return i;
     }
 
-    static std::u16string to_u16string(std::vector<int> &v)
+    static u16string to_u16string(vi &v)
     {
       char16_t *a = new char16_t[v.size() + 1];
 
@@ -481,7 +481,7 @@ namespace nn_eda
 
       a[v.size()] = 0; // terminator.
 
-      std::u16string res(a);
+      u16string res(a);
 
       delete [] a;
 
@@ -497,7 +497,7 @@ namespace nn_eda
         t -= CHAR_RANGE_LENGTHS[i];
       }
 
-      std::cout << "something went wrong... : " << t << std::endl;
+      cout << "something went wrong... : " << t << endl;
       assert(false);
       exit(0);
     }
@@ -510,7 +510,7 @@ namespace nn_eda
         res += CHAR_RANGE_LENGTHS[i];
       }
 
-      std::cout << "something went wrong... : " << t << std::endl;
+      cout << "something went wrong... : " << t << endl;
       assert(false);
       exit(0);
     }
@@ -524,8 +524,8 @@ namespace nn_eda
     public:
 
       Obj(
-        std::vector<int> widths,
-        std::string serialized_weights,
+        vi widths,
+        string serialized_weights,
         float weight_mini,
         float weight_maxi,
         int k_bits
@@ -537,34 +537,34 @@ namespace nn_eda
         this->k_bits = k_bits;
       }
 
-      std::vector<int> widths;
-      std::string serialized_weights;
+      vi widths;
+      string serialized_weights;
       float weight_mini;
       float weight_maxi;
       int k_bits;
 
-      void write(std::string path)
+      void write(string path)
       {
-        std::ofstream ofs(path);
-        ofs << std::setprecision(20);
-        ofs << "nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(" << std::endl;
-        ofs << "std::vector<int>({";
+        ofstream ofs(path);
+        ofs << setprecision(20);
+        ofs << "nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(" << endl;
+        ofs << "vi({";
         for (int width: widths) ofs << width << ", ";
-        ofs << "})," << std::endl;
-        ofs << "\"" << serialized_weights << "\"," << std::endl;
-        ofs << weight_mini << "," << std::endl;
-        ofs << weight_maxi << "," << std::endl;
-        ofs << k_bits << "));" << std::endl;
+        ofs << "})," << endl;
+        ofs << "\"" << serialized_weights << "\"," << endl;
+        ofs << weight_mini << "," << endl;
+        ofs << weight_maxi << "," << endl;
+        ofs << k_bits << "));" << endl;
       }
     };
 
     static Nn from_obj(Obj obj) 
     {
-      std::vector<int> int_weights = Base32768::decode(obj.serialized_weights);
+      vi int_weights = Base32768::decode(obj.serialized_weights);
 
       Scaler scaler(obj.weight_mini, obj.weight_maxi);
-      std::vector<float> weights;
-      for(int w: int_weights) weights.push_back(scaler.unscale((float) w / Util::get_bit_mask(obj.k_bits)));
+      vf weights;
+      for(int w: int_weights) weights.push_back(scaler.unscale((float) w / get_bit_mask(obj.k_bits)));
 
       Nn nn(obj.widths);
       nn.import_weights(weights);
@@ -573,10 +573,10 @@ namespace nn_eda
 
     static Obj to_obj(Nn &nn, int k_bits) 
     {
-      std::vector<float> weights = nn.export_weights();
+      vf weights = nn.export_weights();
       Scaler scaler = Scaler::create(weights);
-      std::vector<int> int_weights;
-      for(float w: weights) int_weights.push_back((int) (scaler.scale(w) * Util::get_bit_mask(k_bits) + 0.5));
+      vi int_weights;
+      for(float w: weights) int_weights.push_back((int) (scaler.scale(w) * get_bit_mask(k_bits) + 0.5));
 
       return Obj(
         nn.widths,
@@ -588,35 +588,42 @@ namespace nn_eda
     }
 
 
-    static void write_raw(Nn &nn, std::string path)
+    static void write_raw(Nn &nn, string path)
     {
-      std::ofstream ofs(path, std::ios::binary);
+      ofstream ofs(path, ios::binary);
       int num_widths = nn.widths.size();
       ofs.write(reinterpret_cast<const char*>(&num_widths), sizeof(int));
       for (int width: nn.widths) ofs.write(reinterpret_cast<const char*>(&width), sizeof(int));
 
-      std::vector<float> weights = nn.export_weights();
+      vf weights = nn.export_weights();
       int num_weights = weights.size();
       ofs.write(reinterpret_cast<const char*>(&num_weights), sizeof(int));
       for (float w: weights) ofs.write(reinterpret_cast<const char*>(&w), sizeof(float));
     }
 
-    static Nn read_raw(std::string path)
+    static Nn read_raw(string path)
     {
-      std::ifstream ifs(path, std::ios::binary);
+      ifstream ifs(path, ios::binary);
       int num_widths;
       ifs.read(reinterpret_cast<char*>(&num_widths), sizeof(int));
-      std::vector<int> widths(num_widths);
+      vi widths(num_widths);
       for(int i = 0; i < num_widths; ++i) ifs.read(reinterpret_cast<char*>(&widths[i]), sizeof(int));
 
       Nn nn(widths);
 
       int num_weights;
       ifs.read(reinterpret_cast<char*>(&num_weights), sizeof(int));
-      std::vector<float> weights(num_weights);
+      vf weights(num_weights);
       for(int i = 0; i < num_weights; ++i) ifs.read(reinterpret_cast<char*>(&weights[i]), sizeof(float));
       nn.import_weights(weights);
       return nn;
     }
+
+  private:
+    static int get_bit_mask(int i)
+    {
+      return (1 << i) - 1;
+    }
+
   };
 }

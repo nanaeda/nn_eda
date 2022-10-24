@@ -10,6 +10,8 @@ namespace nn_eda
   typedef vector<int> vi;
   typedef vector<float> vf;
   typedef vector<vf> vvf;
+  #pragma push_macro("NN_REP")
+  #define NN_REP(i, n) for(int i = 0; i < ((int) (n)); ++i)
 
   class Nn
   {
@@ -19,10 +21,10 @@ namespace nn_eda
       assert(2 <= widths.size());
 
       this->widths = widths;
-      this->ws = create_zero_f3(widths);
-      this->bs = create_zero_f2(widths);
-      this->outs = create_zero_f2(widths);
-      this->softmax_out = new float[widths.back()];
+      ws = create_zero_f3(widths);
+      bs = create_zero_f2(widths);
+      outs = create_zero_f2(widths);
+      softmax_out = new float[widths.back()];
 
       grad_ws = create_zero_f3(widths);
       grad_bs = create_zero_f2(widths);
@@ -30,28 +32,25 @@ namespace nn_eda
       grad_momentum_ws = create_zero_f3(widths);
       grad_momentum_bs = create_zero_f2(widths);
 
-      for (int d = 0; d + 1 < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
-          for (int j = 0; j < widths[d + 1]; ++j) {
+      NN_REP(d, widths.size() - 1){
+        NN_REP(i, widths[d]){
+          NN_REP(j, widths[d + 1]){
             ws[d][i][j] = random_float(-1, 1.0) * sqrtf(6.0f / (float) (widths[d] + widths[d + 1]));
           }
         }
       }
     }
 
-    /**
-     * Note that this is used by the "train" method when you change this.
-     */
     float* forward(vf &v)
     {
       assert(widths[0] == v.size());
 
-      for (int i = 0; i < widths[0]; ++i) outs[0][i] = v[i];
+      NN_REP(i, widths[0]) outs[0][i] = v[i];
 
-      for (int d = 0; (d + 1) < widths.size(); ++d) {
+      NN_REP(d, widths.size() - 1){
         memcpy(outs[d + 1], bs[d + 1], sizeof(float) * widths[d + 1]);
 
-        for (int i = 0; i < widths[d]; ++i) {
+        NN_REP(i, widths[d]){
           float &a = outs[d][i];
           if (0 < d) a = max(a, 0.0f);
           if (a == 0) continue;
@@ -76,17 +75,14 @@ namespace nn_eda
       // softmax
       {
         float softmax_max = outs[widths.size() - 1][0];
-        for (int i = 0; i < widths.back(); ++i) {
-          softmax_max = max(softmax_max, outs[widths.size() - 1][i]);
-        }
+        NN_REP(i, widths.back()) softmax_max = max(softmax_max, outs[widths.size() - 1][i]);
+
         float total = 0.0;
-        for (int i = 0; i < widths.back(); ++i) {
+        NN_REP(i, widths.back()){
           softmax_out[i] = expf(outs[widths.size() - 1][i] - softmax_max);
           total += softmax_out[i];
         }
-        for (int i = 0; i < widths.back(); ++i) {
-          softmax_out[i] /= total;
-        }
+        NN_REP(i, widths.back()) softmax_out[i] /= total;
       }
       return softmax_out;
     }
@@ -94,15 +90,15 @@ namespace nn_eda
     vf export_weights()
     {
       vf res;
-      for (int d = 0; (d + 1) < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
-          for (int j = 0; j < widths[d + 1]; ++j) {
+      NN_REP(d, widths.size() - 1){
+        NN_REP(i, widths[d]){
+          NN_REP(j, widths[d + 1]){
             res.push_back(ws[d][i][j]);
           }
         }
       }
-      for (int d = 0; d < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
+      NN_REP(d, widths.size()){
+        NN_REP(i, widths[d]){
           res.push_back(bs[d][i]);
         }
       }
@@ -112,15 +108,15 @@ namespace nn_eda
     void import_weights(vf v)
     {
       int index = 0;
-      for (int d = 0; (d + 1) < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
-          for (int j = 0; j < widths[d + 1]; ++j) {
+      NN_REP(d, widths.size() - 1){
+        NN_REP(i, widths[d]){
+          NN_REP(j, widths[d + 1]){
             ws[d][i][j] = v[index++];
           }
         }
       }
-      for (int d = 0; d < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
+      NN_REP(d, widths.size()){
+        NN_REP(i, widths[d]){
           bs[d][i] += v[index++];
         }
       }
@@ -150,18 +146,18 @@ namespace nn_eda
       const double decay = 1e-4;
       const double logloss_eps = 1e-6;
 
-      for (int d = 0; d < widths.size(); ++d) {
+      NN_REP(d, widths.size()){
         memset(grad_bs[d], 0, sizeof(float) * widths[d]);
         memset(grad_os[d], 0, sizeof(float) * widths[d]);
       }
-      for (int d = 0; d + 1 < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
+      NN_REP(d, widths.size() - 1){
+        NN_REP(i, widths[d]){
           memset(grad_ws[d][i], 0, sizeof(float) * widths[d + 1]);
         }
       }
 
       double total_loss = 0.0;
-      for (int input_index = 0; input_index < inputs.size(); ++input_index) {
+      NN_REP(input_index, inputs.size()){
         vf input = inputs[input_index];
 
         // forward
@@ -169,23 +165,21 @@ namespace nn_eda
 
         // grad of outputs.
         if(is_policy_gradient){
-          for (int i = 0; i < widths.back(); ++i) {
+          NN_REP(i, widths.back()){
             grad_os[widths.size() - 1][i] = rewards[input_index] * (softmax_out[i] - (i == action_indexes[input_index] ? 1 : 0));
           }
         }else{
           vf label = labels[input_index];
-          for (int i = 0; i < widths.back(); ++i) {
+          NN_REP(i, widths.back()){
             total_loss += label[i] * -log(max((float) logloss_eps, forward_out[i]));
-          }
-          for (int i = 0; i < widths.back(); ++i) {
             grad_os[widths.size() - 1][i] = softmax_out[i] - label[i];
           }
         }
         for (int d = widths.size() - 2; 0 <= d; --d) {
-          for (int i = 0; i < widths[d]; ++i) {
+          NN_REP(i, widths[d]){
             grad_os[d][i] = 0;
             bool relu_applied = (d + 1) < (widths.size() - 1);
-            for (int j = 0; j < widths[d + 1]; ++j) {
+            NN_REP(j, widths[d + 1]){
               if (relu_applied && (outs[d + 1][j] == 0)) continue;
               grad_os[d][i] += grad_os[d + 1][j] * ws[d][i][j];
             }
@@ -194,29 +188,29 @@ namespace nn_eda
 
         // grad of parameters
         for (int d = 1; d < widths.size(); ++d){
-          for (int i = 0; i < widths[d]; ++i){
+          NN_REP(i, widths[d]){
             if ((d + 1 < widths.size()) && outs[d][i] <= 0){
               assert(outs[d][i] == 0);
               continue;
             }
             grad_bs[d][i] += grad_os[d][i];
-            for (int j = 0; j < widths[d - 1]; ++j) {
+            NN_REP(j, widths[d - 1]){
               grad_ws[d - 1][j][i] += grad_os[d][i] * outs[d - 1][j];
             }
           }
         }
       }
 
-      for (int d = 0; d < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
+      NN_REP(d, widths.size()){
+        NN_REP(i, widths[d]){
           float &g = grad_momentum_bs[d][i];
           g = (momentum * g + (grad_bs[d][i] * norm) + decay * bs[d][i]);
           bs[d][i] -= learning_rate * g;
         }
       }
-      for (int d = 0; d + 1 < widths.size(); ++d) {
-        for (int i = 0; i < widths[d]; ++i) {
-          for (int j = 0; j < widths[d + 1]; ++j) {
+      NN_REP(d, widths.size() - 1){
+        NN_REP(i, widths[d]){
+          NN_REP(j, widths[d + 1]){
             float &g = grad_momentum_ws[d][i][j];
             g = (momentum * g + (grad_ws[d][i][j] * norm) + decay * ws[d][i][j]);
             ws[d][i][j] -= learning_rate * g;
@@ -250,7 +244,7 @@ namespace nn_eda
     static float** create_zero_f2(vi &widths)
     {
       float **a = new float*[widths.size()];
-      for (int i = 0; i < widths.size(); ++i) {
+      NN_REP(i, widths.size()){
         int width8 = increment8(widths[i]);
         a[i] = new float[width8];
         memset(a[i], 0, sizeof(float) * width8);
@@ -261,9 +255,9 @@ namespace nn_eda
     static float*** create_zero_f3(vi &widths)
     {
       float ***ws = new float**[widths.size() - 1];
-      for (int i = 0; (i + 1) < widths.size(); ++i) {
+      NN_REP(i, widths.size() - 1){
         ws[i] = new float*[widths[i]];
-        for (int j = 0; j < widths[i]; ++j) {
+        NN_REP(j, widths[i]){
           int width8 = increment8(widths[i + 1]);
           ws[i][j] = new float[width8];
           memset(ws[i][j], 0, sizeof(float) * width8);
@@ -274,8 +268,8 @@ namespace nn_eda
 
     void free_f3(float ***a)
     {
-      for (int i = 0; i + 1 < widths.size(); ++i) {
-        for (int j = 0; j < widths[i]; ++j) {
+      NN_REP(i, widths.size() - 1){
+        NN_REP(j, widths[i]){
           delete [] a[i][j];
         }
         delete [] a[i];
@@ -285,7 +279,7 @@ namespace nn_eda
 
     void free_f2(float **a)
     {
-      for (int i = 0; i < widths.size(); ++i) {
+      NN_REP(i, widths.size()){
         delete [] a[i];
       }
       delete [] a;
@@ -477,7 +471,7 @@ namespace nn_eda
     {
       char16_t *a = new char16_t[v.size() + 1];
 
-      for (int i = 0; i < v.size(); ++i) a[i] = i2c(v[i]);
+      NN_REP(i, v.size()) a[i] = i2c(v[i]);
 
       a[v.size()] = 0; // terminator.
 
@@ -492,7 +486,7 @@ namespace nn_eda
     {
       assert(0 <= t && t <= MASK_15);
 
-      for (int i = 0; i < 3; ++i) {
+      NN_REP(i, 3){
         if (t < CHAR_RANGE_LENGTHS[i]) return (char16_t) (t + CHAR_RANGES[i][0]);
         t -= CHAR_RANGE_LENGTHS[i];
       }
@@ -505,7 +499,7 @@ namespace nn_eda
     static int c2i(char16_t t)
     {
       int res = 0;
-      for (int i = 0; i < 3; ++i) {
+      NN_REP(i, 3){
         if (CHAR_RANGES[i][0] <= t && t <= CHAR_RANGES[i][1]) return res + (t - CHAR_RANGES[i][0]);
         res += CHAR_RANGE_LENGTHS[i];
       }
@@ -607,14 +601,14 @@ namespace nn_eda
       int num_widths;
       ifs.read(reinterpret_cast<char*>(&num_widths), sizeof(int));
       vi widths(num_widths);
-      for(int i = 0; i < num_widths; ++i) ifs.read(reinterpret_cast<char*>(&widths[i]), sizeof(int));
+      NN_REP(i, num_widths) ifs.read(reinterpret_cast<char*>(&widths[i]), sizeof(int));
 
       Nn nn(widths);
 
       int num_weights;
       ifs.read(reinterpret_cast<char*>(&num_weights), sizeof(int));
       vf weights(num_weights);
-      for(int i = 0; i < num_weights; ++i) ifs.read(reinterpret_cast<char*>(&weights[i]), sizeof(float));
+      NN_REP(i, num_weights) ifs.read(reinterpret_cast<char*>(&weights[i]), sizeof(float));
       nn.import_weights(weights);
       return nn;
     }
@@ -626,4 +620,7 @@ namespace nn_eda
     }
 
   };
+
+  #undef NN_REP
+  #pragma pop_macro("NN_REP")
 }

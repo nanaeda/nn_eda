@@ -116,9 +116,9 @@ namespace nn_eda
       return train(inputs, labels, vf(), vi(), lr, false);
     }
 
-    void train_sigmoid(vvf inputs, vf labels, vi actions, double lr)
+    double train_sigmoid(vvf inputs, vf labels, vi actions, double lr)
     {
-      train(inputs, vvf(), labels, actions, lr, true);
+      return train(inputs, vvf(), labels, actions, lr, true);
     }
 
     ~Nn()

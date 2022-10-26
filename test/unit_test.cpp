@@ -5,6 +5,7 @@
 #include <sys/time.h>
 #include <utility>
 #include <x86intrin.h>
+#include "dqn_sampler.cpp"
 
 #define rep(i, n) for (int i = 0; (i) < ((int) (n)); (i)++)
 #define sz(v) ((int) ((v).size()))
@@ -54,6 +55,41 @@ float random_float(float mini, float maxi)
   float f = ((float) (rand() & mask)) / mask;
   return mini + (maxi - mini) * f;
 }
+
+class DqnSamplerTester
+{
+public:
+  static void test()
+  {
+    declare_test_name("DqnSamplerTester");
+    run_test(test_0);
+  }
+
+  static void test_0()
+  {
+    srand(1234);
+
+    int n = 20;
+
+    vector<double> weights;
+    rep(i, n) weights.push_back(random_float(0, 2));
+    double total_weight = 0.0;
+    rep(i, n) total_weight += weights[i];
+
+    DqnSampler<int> sampler(n);
+    rep(i, n / 2) sampler.add_or_overwrite(i, 1.0);
+    rep(i, n) sampler.add_or_overwrite(i, weights[(n / 2 + i) % sz(weights)]);
+
+    int num_attempts = 1000000;
+    vector<int> counts(n, 0);
+    rep(i, num_attempts) ++counts[sampler.get_index()];
+
+    rep(i, n){
+      double expected = weights[i] / total_weight * num_attempts;
+      assert(abs(expected - counts[i]) / counts[i] < 0.05);
+    } 
+  }
+};
 
 class ScalerTester
 {
@@ -247,59 +283,6 @@ public:
     DqnState(int cur, int action, int next, bool completed) : cur(cur), action(action), next(next), is_last(true), completed(completed) {}
   };
 
-  class RandomTree
-  {
-  public:
-    RandomTree(int n) : n(n)
-    {
-      n2 = 1;
-      while(n2 <= n) n2 *= 2;
-      v = vector<double>(n2 * 2, 0);
-    }
-
-    void add(DqnState &s, double d)
-    {
-      set(tail, d);
-      if(sz(states) < n){
-        states.push_back(s);
-      }else{
-        states[tail] = s;
-      }
-      tail = (tail + 1) % n;
-    }
-
-    void set(int i, double d)
-    {
-      i += n2;
-      v[i] = d;
-      while(1 < i){
-        i /= 2;
-        v[i] = v[i * 2] + v[i * 2 + 1];
-      }
-    }
-
-    int get()
-    {
-      int rem = random_float(0, v[1]);
-      int i = 1;
-      while(i < n2){
-        if(rem <= v[i * 2]){
-          i = i * 2;
-        }else{
-          rem -= v[i * 2];
-          i = i * 2 + 1;
-        }
-      }
-      return i - n2;
-    }
-
-    int tail = 0;
-    int n;
-    int n2;
-    vector<double> v;
-    vector<DqnState> states;
-  };
-
   static void test_dqn()
   {
     srand(1234);
@@ -333,7 +316,7 @@ public:
     };
 
     int dat_index = 0;
-    RandomTree states(buffer_size);
+    DqnSampler<DqnState> sampler(buffer_size);
     rep(epoch, num_epochs){
       int total_steps = 0;
       rep(data_i, num_iters){
@@ -358,7 +341,7 @@ public:
 
           for(DqnState &s: hist){
             float score = policy.forward_sigmoid(nn_inputs[s.cur])[s.action];
-            states.add(s, abs(score - compute_reward(s)));
+            sampler.add_or_overwrite(s, abs(score - compute_reward(s)));
           }
         }
         {
@@ -366,12 +349,12 @@ public:
           vector<float> rewards;
           vector<int> action_indexes;
           rep(batch_i, batch_size){
-            int dqn_i = states.get();
-            DqnState &s = states.states[dqn_i];
+            int dqn_i = sampler.get_index();
+            DqnState &s = sampler.get(dqn_i);
 
             float score = policy.forward_sigmoid(nn_inputs[s.cur])[s.action];
             double reward = compute_reward(s);
-            states.set(dqn_i, abs(score - reward));
+            sampler.update_weight(dqn_i, abs(score - reward));
 
             inputs.push_back(nn_inputs[s.cur]);
             rewards.push_back(reward);
@@ -643,6 +626,7 @@ public:
 
 int main()
 {
+  DqnSamplerTester::test();
   ScalerTester::test();
   Base32768Tester::test();
   NnIoTester::test();

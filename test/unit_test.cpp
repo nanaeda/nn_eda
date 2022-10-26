@@ -229,70 +229,167 @@ public:
   {
     declare_test_name("NnTester");
     run_test(test_serde);
-    run_test(test_policy_gradient);
+    run_test(test_dqn);
     run_test(test_max_data);
     run_test(test_one_to_one_data);
     run_test(test_qcut_data);
   }
 
-  static void test_policy_gradient()
+  class DqnState
+  {
+  public:
+    int cur;
+    int action;
+    int next;
+    bool is_last;
+    bool completed;
+    DqnState(int cur, int action, int next) : cur(cur), action(action), next(next), is_last(false) {}
+    DqnState(int cur, int action, int next, bool completed) : cur(cur), action(action), next(next), is_last(true), completed(completed) {}
+  };
+
+  class RandomTree
+  {
+  public:
+    RandomTree(int n) : n(n)
+    {
+      n2 = 1;
+      while(n2 <= n) n2 *= 2;
+      v = vector<double>(n2 * 2, 0);
+    }
+
+    void add(DqnState &s, double d)
+    {
+      set(tail, d);
+      if(sz(states) < n){
+        states.push_back(s);
+      }else{
+        states[tail] = s;
+      }
+      tail = (tail + 1) % n;
+    }
+
+    void set(int i, double d)
+    {
+      i += n2;
+      v[i] = d;
+      while(1 < i){
+        i /= 2;
+        v[i] = v[i * 2] + v[i * 2 + 1];
+      }
+    }
+
+    int get()
+    {
+      int rem = random_float(0, v[1]);
+      int i = 1;
+      while(i < n2){
+        if(rem <= v[i * 2]){
+          i = i * 2;
+        }else{
+          rem -= v[i * 2];
+          i = i * 2 + 1;
+        }
+      }
+      return i - n2;
+    }
+
+    int tail = 0;
+    int n;
+    int n2;
+    vector<double> v;
+    vector<DqnState> states;
+  };
+
+  static void test_dqn()
   {
     srand(1234);
-    int num_epochs = 100;
-    int num_data = 128;
-    int num_trains = 64;
-    int batch_size = 32;
-    int max_length = 1000;
-    double learning_rate = 1e-2;
+    int ranks = 4;
+    int num_epochs = 300;
+    int num_iters = 64;
+    int batch_size = 64;
+    int buffer_size = 1 << 20;
+    int max_length = 500;
+    int target_update = 4;
+    double learning_rate = 1e-3;
 
-    Nn nn(vector<int>({5, 30, 30, 6}));
-    rep(epoch, num_epochs){
-      vector<vector<pair<int, int>>> dat;
-      int total_steps = 0;
-      rep(data_i, num_data){
-        vector<pair<int, int>> hist;
-        for(int loop = 0, cur = 0; loop < max_length && cur < 5; ++loop){
-          vector<float> v(5, 0);
-          v[cur] = 1.0;
-          float *scores = nn.forward(v);
-          float rem = random_float(0, 0.99999);
-          int t = 0;
-          while(t < 6){
-            rem -= scores[t];
-            if(rem <= 0) break;
-            ++t;
-          }
-          if(0 <= rem) debug(rem);
-          if(!(rem <= 0)) debug(rem);
-          assert(rem <= 0);
-          if(random_float(0, 1) < 0.05) t = rand() % 6;
+    Nn policy(vector<int>({ranks, 32, ranks + 1}));
+    Nn target = policy;
+    vector<vector<float>> nn_inputs;
+    rep(i, ranks){
+      vector<float> v(ranks, 0);
+      v[i] = 1.0;
+      nn_inputs.push_back(v);
+    }
 
-          hist.push_back(make_pair(cur, t));
-          if(t <= cur + 1) cur = t;
-          else cur = max(0, cur - 1);
-        }
-        total_steps += sz(hist);
-        dat.push_back(hist);
+    auto compute_reward = [&](DqnState &s){
+      if(s.is_last) return s.completed ? 1.0 : 0.0;
+      int best_action = 0;
+      {
+        float *out = policy.forward_sigmoid(nn_inputs[s.next]);
+        rep(i, ranks + 1)if(out[best_action] < out[i]) best_action = i;
       }
-      debug(total_steps / num_data);
-      if(epoch + 1 == num_epochs) assert(total_steps / num_data < 10.0);
+      float *out = target.forward_sigmoid(nn_inputs[s.next]);
+      return 0.98 * out[best_action];
+    };
 
-      rep(train_i, num_trains){
-        vector<vector<float>> inputs;
-        vector<float> rewards;
-        vector<int> action_indexes;
-        rep(batch_i, batch_size){
-          vector<pair<int, int>> &v = dat[rand() % sz(dat)];
-          int t = rand() % sz(v);
-          double reward = (sz(v) == max_length) ? -1 : 1;
+    int dat_index = 0;
+    RandomTree states(buffer_size);
+    rep(epoch, num_epochs){
+      int total_steps = 0;
+      rep(data_i, num_iters){
+        {
+          vector<DqnState> hist;
+          for(int loop = 0, cur = 0; loop < max_length && cur < ranks; ++loop){
+            float *scores = policy.forward_sigmoid(nn_inputs[cur]);
+            int t = 0;
+            rep(i, ranks + 1)if(scores[t] < scores[i]) t = i;
+            if(random_float(0, 1) < max(0.2, 1.0 - epoch / (num_epochs / 2.0))) t = rand() % (ranks + 1);
 
-          vector<float> input(5, 0);
-          input[v[t].first] = 1.0;
-          inputs.push_back(input);
-          rewards.push_back(reward * pow(0.99, sz(v) - t));
-          action_indexes.push_back(v[t].second);
+            int next;
+            if(t == cur + 1 || t == cur) next = t;
+            else next = max(0, cur - 1);
+
+            hist.push_back(DqnState(cur, t, next));
+            cur = next;
+          }
+          total_steps += sz(hist);
+          hist.back().is_last = true;
+          hist.back().completed = sz(hist) != max_length;
+
+          for(DqnState &s: hist){
+            float score = policy.forward_sigmoid(nn_inputs[s.cur])[s.action];
+            states.add(s, abs(score - compute_reward(s)));
+          }
         }
-        nn.train_policy_gradient(inputs, rewards, action_indexes, learning_rate);
+        {
+          vector<vector<float>> inputs;
+          vector<float> rewards;
+          vector<int> action_indexes;
+          rep(batch_i, batch_size){
+            int dqn_i = states.get();
+            DqnState &s = states.states[dqn_i];
+
+            float score = policy.forward_sigmoid(nn_inputs[s.cur])[s.action];
+            double reward = compute_reward(s);
+            states.set(dqn_i, abs(score - reward));
+
+            inputs.push_back(nn_inputs[s.cur]);
+            rewards.push_back(reward);
+            action_indexes.push_back(s.action);
+          }
+          policy.train_sigmoid(inputs, rewards, action_indexes, learning_rate);
+        }
+      }
+      if(epoch % 5 == 0) debug2(epoch, total_steps / num_iters);
+      if(epoch + 1 == num_epochs) assert(total_steps / num_iters < 10.0);
+      if(epoch % target_update == 0) target = policy;
+
+      if(epoch % 50 == 0){
+        rep(i, ranks){
+          float *out = target.forward_sigmoid(nn_inputs[i]);
+          rep(j, ranks + 1) printf("%0.6f ", out[j]);
+          cout << endl;
+        }
       }
     }
   }
@@ -318,8 +415,8 @@ public:
     rep(loop, n){
       vector<float> v;
       rep(i, widths[0]) v.push_back((rand() % 10000 - 5000) / 1000.0);
-      float *res0 = nn0.forward(v);
-      float *res1 = nn1.forward(v);
+      float *res0 = nn0.forward_softmax(v);
+      float *res1 = nn1.forward_softmax(v);
       rep(i, widths.back()) assert((res0[i] == res1[i]) == should_match);
     }
   }
@@ -362,7 +459,7 @@ public:
       rep(loop, n){
         vector<float> input = generator->gen_input(widths[0]);
         vector<float> label = generator->gen_label(input, widths.back());
-        float *pred = nn.forward(input);
+        float *pred = nn.forward_softmax(input);
         rep(i, sz(label)) total_loss += (-label[i] * log(max(pred[i], 1e-6f)));
       }
       losses.push_back(total_loss / n);
@@ -377,7 +474,7 @@ public:
           inputs.push_back(generator->gen_input(widths[0]));
           labels.push_back(generator->gen_label(inputs.back(), widths.back()));
         }
-        nn.train(inputs, labels, 0.01);
+        nn.train_softmax(inputs, labels, 0.01);
       }
     }
     debug2(losses.back(), target);
@@ -492,8 +589,8 @@ public:
       rep(loop, n){
         vector<float> input;
         rep(i, widths[0]) input.push_back(my_rand(-5, 5));
-        float *f0 = nn0.forward(input);
-        float *f1 = nn1.forward(input);
+        float *f0 = nn0.forward_softmax(input);
+        float *f1 = nn1.forward_softmax(input);
         double diff = 0;
         rep(i, widths.back()) diff += abs(f0[i] - f1[i]);
         total_diff += diff;
@@ -525,7 +622,7 @@ public:
     nn_eda::Nn nn(widths);
 
     for (Batch batch: data) {
-      nn.train(batch.inputs, batch.labels, learning_rate);
+      nn.train_softmax(batch.inputs, batch.labels, learning_rate);
     }
 
     nn_eda::NnIo::Obj io_obj = nn_eda::NnIo::to_obj(nn, encode_bits);

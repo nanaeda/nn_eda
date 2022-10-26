@@ -21,16 +21,7 @@ namespace nn_eda
       assert(2 <= ls.size());
 
       this->ls = ls;
-      ws = gen_f3(ls);
-      bs = gen_f2(ls);
-      outs = gen_f2(ls);
-      softmax_out = new float[ls.back()];
-
-      grad_ws = gen_f3(ls);
-      grad_bs = gen_f2(ls);
-      grad_os = gen_f2(ls);
-      momentum_ws = gen_f3(ls);
-      momentum_bs = gen_f2(ls);
+      prepare_arrays(ls);
 
       FOR(d, ls.size() - 1){
         FOR(i, ls[d]){
@@ -43,52 +34,48 @@ namespace nn_eda
       }
     }
 
-    float* forward(vf &v)
+    void prepare_arrays(vector<int> &ls)
     {
-      assert(ls[0] == v.size());
+      ws = gen_f3(ls);
+      bs = gen_f2(ls);
+      outs = gen_f2(ls);
+      last_out = new float[ls.back()];
 
-      FOR(i, ls[0]) outs[0][i] = v[i];
-
-      FOR(d, ls.size() - 1){
-        memcpy(outs[d + 1], bs[d + 1], sizeof(float) * ls[d + 1]);
-
-        FOR(i, ls[d]){
-          float &a = outs[d][i];
-          if (0 < d) a = max(a, 0.0f);
-          if (a == 0) continue;
-
-          float *out_ptr = outs[d + 1];
-          float *out_ptr_end = outs[d + 1] + ls[d + 1];
-          float *w_ptr = ws[d][i];
-
-          __m256 m256_a = _mm256_set1_ps(a);
-          while(out_ptr < out_ptr_end){
-            __m256 out = _mm256_loadu_ps(out_ptr);
-            __m256 w = _mm256_loadu_ps(w_ptr);
-            out = _mm256_add_ps(_mm256_mul_ps(m256_a, w), out);
-            _mm256_storeu_ps(out_ptr, out);
-
-            out_ptr += 8;
-            w_ptr += 8;
-          }
-        }
-      }
-
-      {
-        float maxi = outs[ls.size() - 1][0];
-        FOR(i, ls.back()) maxi = max(maxi, outs[ls.size() - 1][i]);
-
-        float total = 0.0;
-        FOR(i, ls.back()){
-          softmax_out[i] = expf(outs[ls.size() - 1][i] - maxi);
-          total += softmax_out[i];
-        }
-        FOR(i, ls.back()) softmax_out[i] /= total;
-      }
-      return softmax_out;
+      grad_ws = gen_f3(ls);
+      grad_bs = gen_f2(ls);
+      grad_os = gen_f2(ls);
+      momentum_ws = gen_f3(ls);
+      momentum_bs = gen_f2(ls);
     }
 
-    vf export_weights()
+    Nn(const Nn &nn)
+    {
+      ls = nn.ls;
+      prepare_arrays(ls);
+      import_weights(nn.export_weights());
+    }
+
+    Nn& operator=(const Nn &nn)
+    {
+      free_memory();
+
+      ls = nn.ls;
+      prepare_arrays(ls);
+      import_weights(nn.export_weights());
+      return *this;
+    }
+
+    float* forward_sigmoid(vf &v)
+    { 
+      return forward(v, true);
+    }
+
+    float* forward_softmax(vf &v)
+    {
+      return forward(v, false);
+    }
+
+    vf export_weights() const
     {
       vf res;
       FOR(d, ls.size() - 1){
@@ -124,22 +111,41 @@ namespace nn_eda
       assert(v.size() == index);
     }
 
-    double train(vvf inputs, vvf labels, double lr)
+    double train_softmax(vvf inputs, vvf labels, double lr)
     {
       return train(inputs, labels, vf(), vi(), lr, false);
     }
 
-    void train_policy_gradient(vvf inputs, vf rewards, vi actions, double lr)
+    void train_sigmoid(vvf inputs, vf labels, vi actions, double lr)
     {
-      train(inputs, vvf(), rewards, actions, lr, true);
+      train(inputs, vvf(), labels, actions, lr, true);
     }
+
+    ~Nn()
+    {
+      free_memory();
+    }
+
+    vi ls;
+
+  private:
+    float ***ws;
+    float **bs;
+    float **outs;
+    float *last_out;
+
+    float ***grad_ws;
+    float **grad_bs;
+    float **grad_os;
+    float ***momentum_ws;
+    float **momentum_bs;
 
     double train(vvf inputs, 
                  vvf labels, 
-                 vf rewards,
-                 vi actions,
+                 vf sig_labels,
+                 vi sig_actions,
                  double lr, 
-                 bool is_policy_gradient)
+                 bool is_sigmoid)
     {
       double norm = 1.0 / inputs.size();
       double momentum = 0.9;
@@ -159,17 +165,17 @@ namespace nn_eda
       FOR(input_index, inputs.size()){
         vf input = inputs[input_index];
 
-        float *forward_out = forward(input);
+        float *forward_out = forward(input, is_sigmoid);
 
-        if(is_policy_gradient){
+        if(is_sigmoid){
           FOR(i, ls.back()){
-            grad_os[ls.size() - 1][i] = rewards[input_index] * (softmax_out[i] - (i == actions[input_index] ? 1 : 0));
+            grad_os[ls.size() - 1][i] = (i == sig_actions[input_index]) ? (last_out[i] - sig_labels[input_index]) : 0;
           }
         }else{
           vf &label = labels[input_index];
           FOR(i, ls.back()){
             total_loss += label[i] * -log(max(1e-6f, forward_out[i]));
-            grad_os[ls.size() - 1][i] = softmax_out[i] - label[i];
+            grad_os[ls.size() - 1][i] = last_out[i] - label[i];
           }
         }
         for (int d = ls.size() - 2; 0 <= d; --d) {
@@ -217,24 +223,52 @@ namespace nn_eda
       return total_loss / inputs.size();
     }
 
-    ~Nn()
+    float* forward(vf &v, bool is_sigmoid)
     {
-      free_memory();
+      assert(ls[0] == v.size());
+
+      FOR(i, ls[0]) outs[0][i] = v[i];
+
+      FOR(d, ls.size() - 1){
+        memcpy(outs[d + 1], bs[d + 1], sizeof(float) * ls[d + 1]);
+
+        FOR(i, ls[d]){
+          float &a = outs[d][i];
+          if (0 < d) a = max(a, 0.0f);
+          if (a == 0) continue;
+
+          float *out_ptr = outs[d + 1];
+          float *out_ptr_end = outs[d + 1] + ls[d + 1];
+          float *w_ptr = ws[d][i];
+
+          __m256 m256_a = _mm256_set1_ps(a);
+          while(out_ptr < out_ptr_end){
+            __m256 out = _mm256_loadu_ps(out_ptr);
+            __m256 w = _mm256_loadu_ps(w_ptr);
+            out = _mm256_add_ps(_mm256_mul_ps(m256_a, w), out);
+            _mm256_storeu_ps(out_ptr, out);
+
+            out_ptr += 8;
+            w_ptr += 8;
+          }
+        }
+      }
+
+      if(is_sigmoid){
+        FOR(i, ls.back()) last_out[i] = 1.0 / (1.0 + expf(-outs[ls.size() - 1][i]));
+      }else{
+        float maxi = outs[ls.size() - 1][0];
+        FOR(i, ls.back()) maxi = max(maxi, outs[ls.size() - 1][i]);
+
+        float total = 0.0;
+        FOR(i, ls.back()){
+          last_out[i] = expf(outs[ls.size() - 1][i] - maxi);
+          total += last_out[i];
+        }
+        FOR(i, ls.back()) last_out[i] /= total;
+      }
+      return last_out;
     }
-
-    vi ls;
-
-  private:
-    float ***ws;
-    float **bs;
-    float **outs;
-    float *softmax_out;
-
-    float ***grad_ws;
-    float **grad_bs;
-    float **grad_os;
-    float ***momentum_ws;
-    float **momentum_bs;
 
     static float** gen_f2(vi &ls)
     {
@@ -294,7 +328,7 @@ namespace nn_eda
       free_f3(momentum_ws);
       free_f2(momentum_bs);
 
-      delete [] softmax_out;
+      delete [] last_out;
     }
 
   };

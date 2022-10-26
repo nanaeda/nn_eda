@@ -169,7 +169,13 @@ namespace nn_eda
 
         if(is_sigmoid){
           FOR(i, ls.back()){
-            grad_os[ls.size() - 1][i] = (i == sig_actions[input_index]) ? (last_out[i] - sig_labels[input_index]) : 0;
+            if(i == sig_actions[input_index]){
+              double label = sig_labels[input_index];
+              total_loss -= label * log(max(last_out[i], 1e-6f)) + (1 - label) * log(max(1 - last_out[i], 1e-6f));
+              grad_os[ls.size() - 1][i] = last_out[i] - label;
+            }else{
+              grad_os[ls.size() - 1][i] = 0;
+            }
           }
         }else{
           vf &label = labels[input_index];

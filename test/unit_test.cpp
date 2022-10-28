@@ -264,6 +264,7 @@ public:
   static void test()
   {
     declare_test_name("NnTester");
+    run_test(test_sigmoid);
     run_test(test_serde);
     run_test(test_dqn);
     run_test(test_max_data);
@@ -282,6 +283,43 @@ public:
     DqnState(int cur, int action, int next) : cur(cur), action(action), next(next), is_last(false) {}
     DqnState(int cur, int action, int next, bool completed) : cur(cur), action(action), next(next), is_last(true), completed(completed) {}
   };
+
+  static void test_sigmoid()
+  {
+    srand(1234);
+
+    const int dim_inputs = 10;
+    const int dim_outputs = 3;
+    Nn nn({dim_inputs, 50, 50, dim_outputs});
+    int num_epochs = 30;
+    int num_iters = 512;
+    int batch_size = 32;
+    int signs[dim_inputs][dim_outputs];
+    rep(i, dim_inputs)rep(j, dim_outputs) signs[i][j] = (rand() % 2) ? 1 : -1;
+
+    rep(epoch, num_epochs){
+      double loss = 0.0;
+      rep(iter, num_iters){
+        vector<vector<float>> all_inputs;
+        vector<int> action_indexes;
+        vector<float> labels;
+        rep(batch, batch_size){
+          vector<float> inputs;
+          rep(i, dim_inputs) inputs.push_back(random_float(-1.0, 1.0));
+          all_inputs.push_back(inputs);
+
+          int action_index = rand() % dim_outputs;
+          double total = 0;
+          rep(i, dim_inputs) total += signs[i][action_index] * inputs[i];
+          action_indexes.push_back(action_index);
+          labels.push_back((0 < total) ? 1 : 0);
+        }
+        loss += nn.train_sigmoid(all_inputs, labels, action_indexes, 1e-2);
+      }
+      debug2(epoch, loss / num_iters);
+      if(epoch + 1 == num_epochs) assert(loss / num_iters < 0.05);
+    }
+  }
 
   static void test_dqn()
   {

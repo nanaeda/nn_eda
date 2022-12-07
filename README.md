@@ -49,12 +49,10 @@ nn_eda::Nn nn = nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(
 // A simple file IO is also supported.
 nn_eda::Nn nn = NnIo::read_raw(path);
 
-
-
 // Perform inference.
 // The “forward” method always returns the same float array.
 // So, the returned values need to be used or saved before the next call.
-float* output = nn.forward(input)
+float* output = nn.forward_softmax(input)
 
 ```
 

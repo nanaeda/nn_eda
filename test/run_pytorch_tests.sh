@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eux
+
 trap "rm -rf pytorch_test" EXIT SIGINT
 
 python3 -m venv py_local_env

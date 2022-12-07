@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eux
+
 trap "rm -rf codingame_test" EXIT SIGINT
 rm -rf codingame_nn.txt
 

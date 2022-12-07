@@ -47,7 +47,7 @@ double validate_model(Nn &nn, int dim, int n)
   rep(loop, n){
     int target = rand() % dim;
     vector<float> input = gen_input(dim, target);
-    total_prob += nn.forward(input)[target];
+    total_prob += nn.forward_softmax(input)[target];
   }
   double avg_prob = total_prob / n;
   return avg_prob;
@@ -80,7 +80,7 @@ Nn train_model(int dim)
           inputs.push_back(gen_input(dim, target));
           labels.push_back(gen_label(dim, target));
         }
-        nn.train(inputs, labels, 0.01);
+        nn.train_softmax(inputs, labels, 0.01);
       }
     }
   }
@@ -122,7 +122,7 @@ int main()
 
     debug(validate_model(nn, dim, validation_n));
     // local output
-    //   => 122: validate_model(nn, dim, validation_n)=0.879938
+    //   => 123: validate_model(nn, dim, validation_n)=0.879938
     // codingame output
     //   => 690: validate_model(nn, dim, validation_n)=0.879938
   }

@@ -203,8 +203,8 @@ namespace nn_eda
               }
               _mm256_storeu_ps(local_store, sum);
 
-              FOR(i, 8) total += local_store[i];
-
+              FOR(k, 8) total += local_store[k];
+              
               while(os_ptr < os_ptr_end){
                 total += (*os_ptr) * (*ws_ptr);
                 ++os_ptr;
@@ -523,7 +523,7 @@ namespace nn_eda
         ofstream ofs(path);
         ofs << setprecision(20);
         ofs << "nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(" << endl;
-        ofs << "vi({";
+        ofs << "std::vector<int>({";
         for (int width: ls) ofs << width << ", ";
         ofs << "})," << endl;
         ofs << "\"" << w_str << "\"," << endl;

@@ -23,10 +23,13 @@ namespace nn_eda
       this->ls = ls;
       prepare_arrays(ls);
 
-      FOR(d, ls.size() - 1)FOR(i, ls[d])FOR(j, ls[d + 1]){
-        int mask = (1 << 25) - 1;
-        float f = ((float) (rand() & mask)) / mask;
-        ws[offsets_3[d][i] + j] = (2 * f - 1) * sqrtf(6.0f / (ls[d] + ls[d + 1]));
+      FOR(d, ls.size() - 1)FOR(i, ls[d]){
+        float *offset_ws = ws + get_offset_3(d, i);
+        FOR(j, ls[d + 1]){
+          int mask = (1 << 25) - 1;
+          float f = ((float) (rand() & mask)) / mask;
+          offset_ws[j] = (2 * f - 1) * sqrtf(6.0f / (ls[d] + ls[d + 1]));
+        }
       }
     }
 
@@ -37,34 +40,28 @@ namespace nn_eda
         for(int l: ls) offsets_2.push_back(offsets_2.back() + l);
       }
       {
-        int index = 0;
-        FOR(i, ls.size() - 1){
-          offsets_3.push_back(vector<int>({index}));
-          FOR(j, ls[i]){
-            index += ls[i + 1];
-            offsets_3.back().push_back(index);
-          }
-        }
+        offsets_3.push_back(0);
+        FOR(i, ls.size() - 1) offsets_3.push_back(offsets_3.back() + ls[i] * ls[i + 1]);
       }
 
-      ws = new float[offsets_3.back().back()];
+      ws = new float[offsets_3.back()];
       bs = new float[offsets_2.back()];
       outs = new float[offsets_2.back()];
       last_out = new float[ls.back()];
-      memset(ws, 0, sizeof(float) * offsets_3.back().back());
+      memset(ws, 0, sizeof(float) * offsets_3.back());
       memset(bs, 0, sizeof(float) * offsets_2.back());
       memset(outs, 0, sizeof(float) * offsets_2.back());
       memset(last_out, 0, sizeof(float) * ls.back());
 
-      grad_ws = new float[offsets_3.back().back()];
+      grad_ws = new float[offsets_3.back()];
       grad_bs = new float[offsets_2.back()];
       grad_os = new float[offsets_2.back()];
-      momentum_ws = new float[offsets_3.back().back()];
+      momentum_ws = new float[offsets_3.back()];
       momentum_bs = new float[offsets_2.back()];
-      memset(grad_ws, 0, sizeof(float) * offsets_3.back().back());
+      memset(grad_ws, 0, sizeof(float) * offsets_3.back());
       memset(grad_bs, 0, sizeof(float) * offsets_2.back());
       memset(grad_os, 0, sizeof(float) * offsets_2.back());
-      memset(momentum_ws, 0, sizeof(float) * offsets_3.back().back());
+      memset(momentum_ws, 0, sizeof(float) * offsets_3.back());
       memset(momentum_bs, 0, sizeof(float) * offsets_2.back());
     }
 
@@ -98,7 +95,7 @@ namespace nn_eda
     vf export_weights() const
     {
       vf res;
-      FOR(i, offsets_3.back().back()) res.push_back(ws[i]);
+      FOR(i, offsets_3.back()) res.push_back(ws[i]);
       FOR(i, offsets_2.back()) res.push_back(bs[i]);
       return res;
     }
@@ -106,7 +103,7 @@ namespace nn_eda
     void import_weights(vf v)
     {
       int index = 0;
-      FOR(i, offsets_3.back().back()) ws[i] = v[index++];
+      FOR(i, offsets_3.back()) ws[i] = v[index++];
       FOR(i, offsets_2.back()) bs[i] = v[index++];
       assert(v.size() == index);
     }
@@ -130,7 +127,12 @@ namespace nn_eda
 
   private:
     vector<int> offsets_2;
-    vector<vector<int>> offsets_3;
+    vector<int> offsets_3;
+
+    int get_offset_3(int i0, int i1)
+    {
+      return offsets_3[i0] + i1 * ls[i0 + 1];
+    }
 
     float *ws;
     float *bs;
@@ -156,7 +158,7 @@ namespace nn_eda
 
       memset(grad_bs, 0, sizeof(float) * offsets_2.back());
       memset(grad_os, 0, sizeof(float) * offsets_2.back());
-      memset(grad_ws, 0, sizeof(float) * offsets_3.back().back());
+      memset(grad_ws, 0, sizeof(float) * offsets_3.back());
 
       double total_loss = 0.0;
       FOR(input_index, inputs.size()){
@@ -191,7 +193,7 @@ namespace nn_eda
             if(0 < outs[offsets_2[d] + i]){
               float *os_ptr = grad_os + offsets_2[d + 1];
               float *os_ptr_end = os_ptr + ls[d + 1];
-              float *ws_ptr = ws + offsets_3[d][i];
+              float *ws_ptr = ws + get_offset_3(d, i);
 
               __m256 sum = _mm256_setzero_ps();
               while(os_ptr + 8 <= os_ptr_end){
@@ -222,7 +224,7 @@ namespace nn_eda
             float out = outs[offsets_2[d - 1] + j];
             float *os_ptr = grad_os + offsets_2[d];
             float *os_ptr_end = os_ptr + ls[d];
-            float *grad_ws_ptr = grad_ws + offsets_3[d - 1][j];
+            float *grad_ws_ptr = grad_ws + get_offset_3(d - 1, j);
 
             __m256 m256_out = _mm256_set1_ps(out);
             while(os_ptr + 8 <= os_ptr_end){
@@ -252,10 +254,11 @@ namespace nn_eda
       }
       FOR(d, ls.size() - 1){
         FOR(i, ls[d]){
-          float *offset_grad_ws = grad_ws + offsets_3[d][i];
-          float *offset_ws = ws + offsets_3[d][i];
+          float *offset_grad_ws = grad_ws + get_offset_3(d, i);
+          float *offset_ws = ws + get_offset_3(d, i);
+          float *offset_momentum_ws = momentum_ws + get_offset_3(d, i);
           FOR(j, ls[d + 1]){
-            float &g = momentum_ws[offsets_3[d][i] + j];
+            float &g = offset_momentum_ws[j];
             g = (momentum * g + (offset_grad_ws[j] * norm) + decay * offset_ws[j]);
             offset_ws[j] -= lr * g;
           }
@@ -281,7 +284,7 @@ namespace nn_eda
 
           float *out_ptr = outs + offsets_2[d + 1];
           float *out_ptr_end = out_ptr + ls[d + 1];
-          float *w_ptr = ws + offsets_3[d][i];
+          float *w_ptr = ws + get_offset_3(d, i);
 
           __m256 m256_a = _mm256_set1_ps(a);
           while(out_ptr + 8 <= out_ptr_end){

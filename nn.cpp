@@ -183,32 +183,61 @@ namespace nn_eda
             g[i] = last_out[i] - label[i];
           }
         }
-        for (int d = ls.size() - 2; 0 <= d; --d) {
-          float *offset_grad_os_0 = grad_os + offsets_2[d + 0];
-          float *offset_grad_os_1 = grad_os + offsets_2[d + 1];
+
+        float local_store[8];
+        for (int d = ls.size() - 2; 1 <= d; --d) {
           FOR(i, ls[d]){
-            float *offset_ws = ws + offsets_3[d][i];
-            offset_grad_os_0[i] = 0;
-            bool relu_applied = (d + 1) < (ls.size() - 1);
-            FOR(j, ls[d + 1]){
-              if (relu_applied && (outs[offsets_2[d + 1] + j] == 0)) continue;
-              offset_grad_os_0[i] += offset_grad_os_1[j] * offset_ws[j];
+            float total = 0;
+            if(0 < outs[offsets_2[d] + i]){
+              float *os_ptr = grad_os + offsets_2[d + 1];
+              float *os_ptr_end = os_ptr + ls[d + 1];
+              float *ws_ptr = ws + offsets_3[d][i];
+
+              __m256 sum = _mm256_setzero_ps();
+              while(os_ptr + 8 <= os_ptr_end){
+                __m256 o = _mm256_loadu_ps(os_ptr);
+                __m256 w = _mm256_loadu_ps(ws_ptr);
+                sum = _mm256_add_ps(_mm256_mul_ps(o, w), sum);
+                os_ptr += 8;
+                ws_ptr += 8;
+              }
+              _mm256_storeu_ps(local_store, sum);
+
+              FOR(i, 8) total += local_store[i];
+
+              while(os_ptr < os_ptr_end){
+                total += (*os_ptr) * (*ws_ptr);
+                ++os_ptr;
+                ++ws_ptr;
+              }
             }
+            grad_os[offsets_2[d] + i] = total;
           }
         }
 
         for (int d = 1; d < ls.size(); ++d){
-          FOR(i, ls[d]){
-            if ((d + 1 < ls.size()) && outs[offsets_2[d] + i] <= 0){
-              assert(outs[offsets_2[d] + i] == 0);
-              continue;
-            }
+          FOR(i, ls[d]) grad_bs[offsets_2[d] + i] += grad_os[offsets_2[d] + i];;
+          FOR(j, ls[d - 1]){
 
-            float *offset_outs = outs + offsets_2[d - 1];
-            float grad_o = grad_os[offsets_2[d] + i];
-            grad_bs[offsets_2[d] + i] += grad_o;
-            FOR(j, ls[d - 1]){
-              grad_ws[offsets_3[d - 1][j] + i] += grad_o * offset_outs[j];
+            float out = outs[offsets_2[d - 1] + j];
+            float *os_ptr = grad_os + offsets_2[d];
+            float *os_ptr_end = os_ptr + ls[d];
+            float *grad_ws_ptr = grad_ws + offsets_3[d - 1][j];
+
+            __m256 m256_out = _mm256_set1_ps(out);
+            while(os_ptr + 8 <= os_ptr_end){
+              __m256 o = _mm256_loadu_ps(os_ptr);
+              __m256 grad_w = _mm256_loadu_ps(grad_ws_ptr);
+              grad_w = _mm256_add_ps(_mm256_mul_ps(m256_out, o), grad_w);
+              _mm256_storeu_ps(grad_ws_ptr, grad_w);
+
+              os_ptr += 8;
+              grad_ws_ptr += 8;
+            }
+            while(os_ptr < os_ptr_end){
+              *grad_ws_ptr += out * (*os_ptr);
+              ++os_ptr;
+              ++grad_ws_ptr;
             }
           }
         }
@@ -251,7 +280,7 @@ namespace nn_eda
           if (a == 0) continue;
 
           float *out_ptr = outs + offsets_2[d + 1];
-          float *out_ptr_end = outs + offsets_2[d + 1] + ls[d + 1];
+          float *out_ptr_end = out_ptr + ls[d + 1];
           float *w_ptr = ws + offsets_3[d][i];
 
           __m256 m256_a = _mm256_set1_ps(a);

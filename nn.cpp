@@ -10,21 +10,24 @@ namespace nn_eda
   using namespace std;
   typedef vector<int> vi;
   typedef vector<float> vf;
-  typedef vector<vf> vvf;
   #pragma push_macro("FOR")
   #define FOR(i, n) for(int i = 0; i < ((int) (n)); ++i)
 
   class Inferrer
   {
   public:
-    Inferrer(vi ls) : ls(ls)
+    Inferrer(const vi &fc_widths, const vi &head_widths)
     {
+      set_widths(fc_widths, head_widths);
+      
       allocate_memory();
       initialize_weights(); 
     }
 
-    Inferrer(const Inferrer &obj) : ls(obj.ls)
+    Inferrer(const Inferrer &obj)
     {
+      set_widths(obj.fc_widths, obj.head_widths);
+
       allocate_memory();
       import_weights(obj.export_weights());
     }
@@ -33,7 +36,8 @@ namespace nn_eda
     {
       free_memory();
 
-      ls = obj.ls;
+      set_widths(obj.fc_widths, obj.head_widths);
+
       allocate_memory();
       import_weights(obj.export_weights());
 
@@ -61,10 +65,18 @@ namespace nn_eda
       return res;
     }
 
-    vi ls;
+    float get_prediction(int head_i, int index)
+    {
+      return last_out[head_offsets[head_i] + index];
+    }
 
-    vector<int> b_offsets;
-    vector<int> w_offsets;
+    vi all_widths;
+    vi fc_widths;
+    vi head_widths;
+    vi head_offsets;
+
+    vi b_offsets;
+    vi w_offsets;
 
     float *ws;
     float *bs;
@@ -73,25 +85,25 @@ namespace nn_eda
 
     int get_w_offset(int i0, int i1)
     {
-      return w_offsets[i0] + i1 * ls[i0 + 1];
+      return w_offsets[i0] + i1 * all_widths[i0 + 1];
     }
 
     float* forward(vf &v)
     {
-      assert(ls[0] == v.size());
+      assert(all_widths[0] == v.size());
 
-      FOR(i, ls[0]) outs[b_offsets[0] + i] = v[i];
+      FOR(i, all_widths[0]) outs[b_offsets[0] + i] = v[i];
 
-      FOR(d, ls.size() - 1){
-        memcpy(outs + b_offsets[d + 1], bs + b_offsets[d + 1], sizeof(float) * ls[d + 1]);
+      FOR(d, all_widths.size() - 1){
+        memcpy(outs + b_offsets[d + 1], bs + b_offsets[d + 1], sizeof(float) * all_widths[d + 1]);
 
-        FOR(i, ls[d]){
+        FOR(i, all_widths[d]){
           float &a = outs[b_offsets[d] + i];
           if (0 < d) a = max(a, 0.0f);
           if (a == 0) continue;
 
           float *out_ptr = outs + b_offsets[d + 1];
-          float *out_ptr_end = out_ptr + ls[d + 1];
+          float *out_ptr_end = out_ptr + all_widths[d + 1];
           float *w_ptr = ws + get_w_offset(d, i);
 
           __m256 m256_a = _mm256_set1_ps(a);
@@ -112,38 +124,50 @@ namespace nn_eda
         }
       }
 
-      {
-        float maxi = outs[b_offsets[ls.size() - 1] + 0];
-        FOR(i, ls.back()) maxi = max(maxi, outs[b_offsets[ls.size() - 1] + i]);
+      FOR(head_i, head_widths.size()){
+        float *out_ptr = outs + b_offsets[all_widths.size() - 1] + head_offsets[head_i];
+        float *last_out_ptr = last_out + head_offsets[head_i];
+
+        float maxi = out_ptr[0];
+        FOR(i, head_widths[head_i]) maxi = max(maxi, out_ptr[i]);
 
         float total = 0.0;
-        FOR(i, ls.back()){
-          last_out[i] = expf(outs[b_offsets[ls.size() - 1] + i] - maxi);
-          total += last_out[i];
+        FOR(i, head_widths[head_i]){
+          last_out_ptr[i] = expf(out_ptr[i] - maxi);
+          total += last_out_ptr[i];
         }
-        FOR(i, ls.back()) last_out[i] /= total;
+        FOR(i, head_widths[head_i]) last_out_ptr[i] /= total;
       }
+
       return last_out;
     }
 
   private:
 
+    void set_widths(const vi &fc_widths, const vi &head_widths)
+    {
+      this->fc_widths = fc_widths;
+      this->head_widths = head_widths;
+
+      head_offsets = vi({0});
+      for(int w: head_widths) head_offsets.push_back(head_offsets.back() + w);
+
+      all_widths = fc_widths;
+      all_widths.push_back(head_offsets.back());
+    }
+
     void allocate_memory()
     {
       b_offsets.push_back(0);
-      FOR(i, ls.size()) b_offsets.push_back(b_offsets.back() + ls[i]);
+      FOR(i, all_widths.size()) b_offsets.push_back(b_offsets.back() + all_widths[i]);
 
       w_offsets.push_back(0);
-      FOR(i, ls.size() - 1) w_offsets.push_back(w_offsets.back() + ls[i] * ls[i + 1]);
+      FOR(i, all_widths.size() - 1) w_offsets.push_back(w_offsets.back() + all_widths[i] * all_widths[i + 1]);
 
       ws = new float[w_offsets.back()];
       bs = new float[b_offsets.back()];
       outs = new float[b_offsets.back()];
-      last_out = new float[ls.back()];
-      memset(ws, 0, sizeof(float) * w_offsets.back());
-      memset(bs, 0, sizeof(float) * b_offsets.back());
-      memset(outs, 0, sizeof(float) * b_offsets.back());
-      memset(last_out, 0, sizeof(float) * ls.back());
+      last_out = new float[all_widths.back()];
     }
 
     void free_memory()
@@ -156,12 +180,14 @@ namespace nn_eda
 
     void initialize_weights()
     {
-      FOR(d, ls.size() - 1)FOR(i, ls[d]){
+      memset(bs, 0, sizeof(float) * b_offsets.back());
+
+      FOR(d, all_widths.size() - 1)FOR(i, all_widths[d]){
         float *offset_ws = ws + get_w_offset(d, i);
-        FOR(j, ls[d + 1]){
+        FOR(j, all_widths[d + 1]){
           int mask = (1 << 25) - 1;
           float f = ((float) (rand() & mask)) / mask;
-          offset_ws[j] = (2 * f - 1) * sqrtf(6.0f / (ls[d] + ls[d + 1]));
+          offset_ws[j] = (2 * f - 1) * sqrtf(6.0f / (all_widths[d] + all_widths[d + 1]));
         }
       }
     }
@@ -171,7 +197,7 @@ namespace nn_eda
   class Nn : public Inferrer
   {
   public:
-    Nn(vi ls) : Inferrer(ls)
+    Nn(const vi &fc_widths, const vi &head_widths) : Inferrer(fc_widths, head_widths)
     {
       allocate_memory();
     }
@@ -210,7 +236,7 @@ namespace nn_eda
       free_memory();
     }
 
-    double train(vvf inputs, vvf labels, double lr)
+    double train(const vector<vf> &inputs, const vector<vector<vf>> &labels, double lr)
     {
       double norm = 1.0 / inputs.size();
       double momentum = 0.9;
@@ -224,24 +250,26 @@ namespace nn_eda
       FOR(input_index, inputs.size()){
         vf input = inputs[input_index];
 
-        float *forward_out = forward(input);
+        forward(input);
 
-        {
-          float *g = grad_os + b_offsets[ls.size() - 1];
-          vf &label = labels[input_index];
-          FOR(i, ls.back()){
-            total_loss += label[i] * -log(max(1e-6f, forward_out[i]));
-            g[i] = last_out[i] - label[i];
+        FOR(head_i, head_widths.size()){
+          float *g = grad_os + b_offsets[all_widths.size() - 1] + head_offsets[head_i];
+          const vf &label = labels[input_index][head_i];
+          if(label.empty()) continue;
+          FOR(i, head_widths[head_i]){
+            float out = last_out[head_offsets[head_i] + i];
+            total_loss += label[i] * -log(max(1e-6f, out));
+            g[i] = out - label[i];
           }
         }
 
         float local_store[8];
-        for (int d = ls.size() - 2; 1 <= d; --d) {
-          FOR(i, ls[d]){
+        for (int d = all_widths.size() - 2; 1 <= d; --d) {
+          FOR(i, all_widths[d]){
             float total = 0;
             if(0 < outs[b_offsets[d] + i]){
               float *os_ptr = grad_os + b_offsets[d + 1];
-              float *os_ptr_end = os_ptr + ls[d + 1];
+              float *os_ptr_end = os_ptr + all_widths[d + 1];
               float *ws_ptr = ws + get_w_offset(d, i);
 
               __m256 sum = _mm256_setzero_ps();
@@ -266,13 +294,13 @@ namespace nn_eda
           }
         }
 
-        for (int d = 1; d < ls.size(); ++d){
-          FOR(i, ls[d]) grad_bs[b_offsets[d] + i] += grad_os[b_offsets[d] + i];;
-          FOR(j, ls[d - 1]){
+        for (int d = 1; d < all_widths.size(); ++d){
+          FOR(i, all_widths[d]) grad_bs[b_offsets[d] + i] += grad_os[b_offsets[d] + i];;
+          FOR(j, all_widths[d - 1]){
 
             float out = outs[b_offsets[d - 1] + j];
             float *os_ptr = grad_os + b_offsets[d];
-            float *os_ptr_end = os_ptr + ls[d];
+            float *os_ptr_end = os_ptr + all_widths[d];
             float *grad_ws_ptr = grad_ws + get_w_offset(d - 1, j);
 
             __m256 m256_out = _mm256_set1_ps(out);
@@ -294,19 +322,19 @@ namespace nn_eda
         }
       }
 
-      FOR(d, ls.size()){
-        FOR(i, ls[d]){
+      FOR(d, all_widths.size()){
+        FOR(i, all_widths[d]){
           float &g = momentum_bs[b_offsets[d] + i];
           g = (momentum * g + (grad_bs[b_offsets[d] + i] * norm) + decay * bs[b_offsets[d] + i]);
           bs[b_offsets[d] + i] -= lr * g;
         }
       }
-      FOR(d, ls.size() - 1){
-        FOR(i, ls[d]){
+      FOR(d, all_widths.size() - 1){
+        FOR(i, all_widths[d]){
           float *offset_grad_ws = grad_ws + get_w_offset(d, i);
           float *offset_ws = ws + get_w_offset(d, i);
           float *offset_momentum_ws = momentum_ws + get_w_offset(d, i);
-          FOR(j, ls[d + 1]){
+          FOR(j, all_widths[d + 1]){
             float &g = offset_momentum_ws[j];
             g = (momentum * g + (offset_grad_ws[j] * norm) + decay * offset_ws[j]);
             offset_ws[j] -= lr * g;
@@ -507,14 +535,16 @@ namespace nn_eda
     public:
 
       Obj(
-        vi ls,
+        vi fc_widths,
+        vi head_widths,
         string w_str,
         float w_mini,
         float w_maxi,
         int k_bits
-      ) : ls(ls), w_str(w_str), w_mini(w_mini), w_maxi(w_maxi), k_bits(k_bits) {}
+      ) : fc_widths(fc_widths), head_widths(head_widths), w_str(w_str), w_mini(w_mini), w_maxi(w_maxi), k_bits(k_bits) {}
 
-      vi ls;
+      vi fc_widths;
+      vi head_widths;
       string w_str;
       float w_mini;
       float w_maxi;
@@ -526,7 +556,10 @@ namespace nn_eda
         ofs << setprecision(20);
         ofs << "nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(" << endl;
         ofs << "std::vector<int>({";
-        for (int width: ls) ofs << width << ", ";
+        for (int width: fc_widths) ofs << width << ", ";
+        ofs << "})," << endl;
+        ofs << "std::vector<int>({";
+        for (int width: head_widths) ofs << width << ", ";
         ofs << "})," << endl;
         ofs << "\"" << w_str << "\"," << endl;
         ofs << w_mini << "," << endl;
@@ -543,7 +576,7 @@ namespace nn_eda
       vf weights;
       for(int w: int_weights) weights.push_back(scaler.unscale((float) w / ((1 << obj.k_bits) - 1)));
 
-      Nn nn(obj.ls);
+      Nn nn(obj.fc_widths, obj.head_widths);
       nn.import_weights(weights);
       return nn;
     }
@@ -556,7 +589,8 @@ namespace nn_eda
       for(float w: weights) int_weights.push_back((int) (scaler.scale(w) * ((1 << k_bits) - 1) + 0.5));
 
       return Obj(
-        nn.ls,
+        nn.fc_widths,
+        nn.head_widths,
         Base32768::encode_k_bit_integer(int_weights, k_bits),
         scaler.mini,
         scaler.maxi,
@@ -567,9 +601,13 @@ namespace nn_eda
     static void write_raw(Nn &nn, string path)
     {
       ofstream ofs(path, ios::binary);
-      int num_ls = nn.ls.size();
-      ofs.write(reinterpret_cast<const char*>(&num_ls), sizeof(int));
-      for (int width: nn.ls) ofs.write(reinterpret_cast<const char*>(&width), sizeof(int));
+      int num_fc = nn.fc_widths.size();
+      ofs.write(reinterpret_cast<const char*>(&num_fc), sizeof(int));
+      for (int width: nn.fc_widths) ofs.write(reinterpret_cast<const char*>(&width), sizeof(int));
+
+      int num_head = nn.head_widths.size();
+      ofs.write(reinterpret_cast<const char*>(&num_head), sizeof(int));
+      for (int width: nn.head_widths) ofs.write(reinterpret_cast<const char*>(&width), sizeof(int));
 
       vf weights = nn.export_weights();
       int num_weights = weights.size();
@@ -580,12 +618,19 @@ namespace nn_eda
     static Nn read_raw(string path)
     {
       ifstream ifs(path, ios::binary);
-      int num_ls;
-      ifs.read(reinterpret_cast<char*>(&num_ls), sizeof(int));
-      vi ls(num_ls);
-      FOR(i, num_ls) ifs.read(reinterpret_cast<char*>(&ls[i]), sizeof(int));
 
-      Nn nn(ls);
+      auto read_vec = [&ifs](){
+        int num;
+        ifs.read(reinterpret_cast<char*>(&num), sizeof(int));
+        vi v(num);
+        FOR(i, num) ifs.read(reinterpret_cast<char*>(&v[i]), sizeof(int));
+        return v;
+      };
+
+      vi fc_widths = read_vec();
+      vi head_widths = read_vec();
+
+      Nn nn(fc_widths, head_widths);
 
       int num_weights;
       ifs.read(reinterpret_cast<char*>(&num_weights), sizeof(int));

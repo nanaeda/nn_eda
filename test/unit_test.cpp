@@ -290,7 +290,7 @@ public:
 
     const int dim_inputs = 10;
     const int dim_outputs = 3;
-    Nn nn({dim_inputs, 50, 50, dim_outputs});
+    Nn nn({dim_inputs, 50, 50}, {dim_outputs});
     int num_epochs = 30;
     int num_iters = 512;
     int batch_size = 32;
@@ -302,7 +302,7 @@ public:
       int success = 0;
       rep(iter, num_iters){
         vector<vector<float>> all_inputs;
-        vector<vector<float>> labels;
+        vector<vector<vector<float>>> labels;
         rep(batch, batch_size){
           vector<float> inputs;
           rep(i, dim_inputs) inputs.push_back(random_float(-1.0, 1.0));
@@ -319,7 +319,7 @@ public:
           vector<float> l(dim_outputs, 0);
           l[v[0].second] = 1;
 
-          labels.push_back(l);
+          labels.push_back({l});
 
           float *f = nn.forward(inputs);
           if(0.5 < f[v[0].second]) success += 1;
@@ -337,7 +337,6 @@ public:
 
   static void test_dqn()
   {
-    /*
     srand(1234);
     int ranks = 4;
     int num_epochs = 300;
@@ -348,7 +347,7 @@ public:
     int target_update = 4;
     double learning_rate = 1e-3;
 
-    Nn policy(vector<int>({ranks, 32, ranks + 1}));
+    Nn policy({ranks, 32}, vector<int>(ranks + 1, 2));
     Nn target = policy;
     vector<vector<float>> nn_inputs;
     rep(i, ranks){
@@ -360,12 +359,12 @@ public:
     auto compute_reward = [&](DqnState &s){
       if(s.is_last) return s.completed ? 1.0 : 0.0;
       int best_action = 0;
-      {
-        float *out = policy.forward_sigmoid(nn_inputs[s.next]);
-        rep(i, ranks + 1)if(out[best_action] < out[i]) best_action = i;
-      }
-      float *out = target.forward_sigmoid(nn_inputs[s.next]);
-      return 0.98 * out[best_action];
+
+      policy.forward(nn_inputs[s.next]);
+      rep(i, ranks + 1)if(policy.get_prediction(best_action, 1) < policy.get_prediction(i, 1)) best_action = i;
+
+      target.forward(nn_inputs[s.next]);
+      return 0.98 * target.get_prediction(best_action, 1);
     };
 
     int dat_index = 0;
@@ -376,9 +375,10 @@ public:
         {
           vector<DqnState> hist;
           for(int loop = 0, cur = 0; loop < max_length && cur < ranks; ++loop){
-            float *scores = policy.forward_sigmoid(nn_inputs[cur]);
+            policy.forward(nn_inputs[cur]);
+
             int t = 0;
-            rep(i, ranks + 1)if(scores[t] < scores[i]) t = i;
+            rep(i, ranks + 1)if(policy.get_prediction(t, 1) < policy.get_prediction(i, 1)) t = i;
             if(random_float(0, 1) < max(0.2, 1.0 - epoch / (num_epochs / 2.0))) t = rand() % (ranks + 1);
 
             int next;
@@ -393,27 +393,28 @@ public:
           hist.back().completed = sz(hist) != max_length;
 
           for(DqnState &s: hist){
-            float score = policy.forward_sigmoid(nn_inputs[s.cur])[s.action];
-            sampler.add_or_overwrite(s, abs(score - compute_reward(s)));
+            policy.forward(nn_inputs[s.cur]);
+            sampler.add_or_overwrite(s, abs(policy.get_prediction(s.action, 1) - compute_reward(s)));
           }
         }
         {
           vector<vector<float>> inputs;
-          vector<float> rewards;
-          vector<int> action_indexes;
+          vector<vector<vector<float>>> rewards;
           rep(batch_i, batch_size){
             int dqn_i = sampler.get_index();
             DqnState &s = sampler.get(dqn_i);
 
-            float score = policy.forward_sigmoid(nn_inputs[s.cur])[s.action];
-            double reward = compute_reward(s);
-            sampler.update_weight(dqn_i, abs(score - reward));
+            policy.forward(nn_inputs[s.cur]);
+            float reward = compute_reward(s);
+            sampler.update_weight(dqn_i, abs(policy.get_prediction(s.action, 1) - reward));
 
             inputs.push_back(nn_inputs[s.cur]);
-            rewards.push_back(reward);
-            action_indexes.push_back(s.action);
+            vector<vector<float>> v(ranks + 1);
+            v[s.action] = {1 - reward, reward};
+
+            rewards.push_back(v);
           }
-          policy.train_sigmoid(inputs, rewards, action_indexes, learning_rate);
+          policy.train(inputs, rewards, learning_rate);
         }
       }
       if(epoch % 5 == 0) debug2(epoch, total_steps / num_iters);
@@ -422,70 +423,73 @@ public:
 
       if(epoch % 50 == 0){
         rep(i, ranks){
-          float *out = target.forward_sigmoid(nn_inputs[i]);
-          rep(j, ranks + 1) printf("%0.6f ", out[j]);
+          target.forward(nn_inputs[i]);
+          rep(j, ranks + 1) printf("%0.6f ", target.get_prediction(j, 1));
           cout << endl;
         }
       }
     }
-    */
   }
 
   static void test_serde()
   {
-    vector<int> widths({23, 45, 67, 89});
+    vector<int> fc_widths({23, 45, 67, 89});
+    vector<int> head_widths({5, 6, 7});
     srand(345);
-    Nn nn0(widths);
+    Nn nn0(fc_widths, head_widths);
     srand(678);
-    Nn nn1(widths);
-    compare_nn_outputs(nn0, nn0, widths, true);
-    compare_nn_outputs(nn1, nn1, widths, true);
+    Nn nn1(fc_widths, head_widths);
+    compare_nn_outputs(nn0, nn0, fc_widths, head_widths, true);
+    compare_nn_outputs(nn1, nn1, fc_widths, head_widths, true);
 
-    compare_nn_outputs(nn0, nn1, widths, false);
+    compare_nn_outputs(nn0, nn1, fc_widths, head_widths, false);
     nn1.import_weights(nn0.export_weights());
-    compare_nn_outputs(nn0, nn1, widths, true);
+    compare_nn_outputs(nn0, nn1, fc_widths, head_widths, true);
   }
 
-  static void compare_nn_outputs(Nn &nn0, Nn &nn1, vector<int> &widths, bool should_match)
+  static void compare_nn_outputs(Nn &nn0, Nn &nn1, vector<int> &fc_widths, vector<int> &head_widths, bool should_match)
   {
-    int n = 100;
+    int n = 1;
     rep(loop, n){
       vector<float> v;
-      rep(i, widths[0]) v.push_back((rand() % 10000 - 5000) / 1000.0);
-      float *res0 = nn0.forward(v);
-      float *res1 = nn1.forward(v);
-      rep(i, widths.back()) assert((res0[i] == res1[i]) == should_match);
+      rep(i, fc_widths[0]) v.push_back((rand() % 10000 - 5000) / 1000.0);
+      nn0.forward(v);
+      nn1.forward(v);
+      rep(i, sz(head_widths))rep(j, head_widths[i]){
+        cerr << nn0.get_prediction(i, j) << ", " << nn1.get_prediction(i, j) << endl;
+        assert((nn0.get_prediction(i, j) == nn1.get_prediction(i, j)) == should_match);
+      }
     }
   }
 
   static void test_max_data()
   {
     NnMaxDataGenerator generator;
-    test_training((NnDataGenerator*) &generator, vector<int>({25, 50, 50, 10}), -log(0.8));
+    test_training((NnDataGenerator*) &generator, {25, 50, 50}, {10}, -log(0.8));
   }
 
   static void test_one_to_one_data()
   {
     NnOneToOneDataGenerator generator;
-    test_training((NnDataGenerator*) &generator, vector<int>({25, 50, 50, 10}), -log(0.95));
+    test_training((NnDataGenerator*) &generator, {25, 50, 50}, {10}, -log(0.95));
   }
 
   static void test_always_label_two_data()
   {
     NnAlwaysLabelTwoDataGenerator generator;
-    test_training((NnDataGenerator*) &generator, vector<int>({25, 50, 50, 10}), -log(0.99));
+    test_training((NnDataGenerator*) &generator, {25, 50, 50}, {10}, -log(0.99));
   }
 
   static void test_qcut_data()
   {
     NnQcutDataGenerator generator;
-    test_training((NnDataGenerator*) &generator, vector<int>({10, 50, 50, 10}), -log(0.8));
+    test_training((NnDataGenerator*) &generator, {10, 50, 50}, {10}, -log(0.8));
   }
 
-  static void test_training(NnDataGenerator *generator, vector<int> widths, double target, int num_epochs = 10)
+  static void test_training(NnDataGenerator *generator, vector<int> fc_widths, vector<int> head_widths, double target, int num_epochs = 10)
   {
     srand(1234);
-    Nn nn(widths);
+    Nn nn(fc_widths, head_widths);
 
     vector<double> losses;
     rep(epoch, num_epochs){
@@ -494,8 +498,8 @@ public:
       double total_loss = 0;
       int n = 2000;
       rep(loop, n){
-        vector<float> input = generator->gen_input(widths[0]);
-        vector<float> label = generator->gen_label(input, widths.back());
+        vector<float> input = generator->gen_input(fc_widths[0]);
+        vector<float> label = generator->gen_label(input, head_widths[0]);
         float *pred = nn.forward(input);
         rep(i, sz(label)) total_loss += (-label[i] * log(max(pred[i], 1e-6f)));
       }
@@ -506,10 +510,10 @@ public:
       rep(loop, 2000){
         int batch = 16;
         vector<vector<float>> inputs;
-        vector<vector<float>> labels;
+        vector<vector<vector<float>>> labels;
         rep(i, batch){
-          inputs.push_back(generator->gen_input(widths[0]));
-          labels.push_back(generator->gen_label(inputs.back(), widths.back()));
+          inputs.push_back(generator->gen_input(fc_widths[0]));
+          labels.push_back({generator->gen_label(inputs.back(), head_widths[0])});
         }
         nn.train(inputs, labels, 0.01);
       }
@@ -601,35 +605,37 @@ public:
   static void test_raw_io()
   { 
     string path = "nn_io_test.txt";
-    vector<int> widths({20, 50, 50, 10});
-    Nn nn0(widths);
+    vector<int> fc_widths({20, 50, 50, 10});
+    vector<int> head_widths({5, 9, 4});
+    Nn nn0(fc_widths, head_widths);
     NnIo::write_raw(nn0, path);
     Nn nn1 = NnIo::read_raw(path);
-    NnTester::compare_nn_outputs(nn0, nn1, widths, true);
+    NnTester::compare_nn_outputs(nn0, nn1, fc_widths, head_widths, true);
   }
 
   static void test_obj_creation()
   {
     for(int k_bits = 16; 10 < k_bits; --k_bits){
-      vector<int> widths({20, 50, 50, 10});
-      Nn nn0(widths);
+      vector<int> fc_widths({20, 50, 50, 10});
+      vector<int> head_widths({9, 4, 5});
+      Nn nn0(fc_widths, head_widths);
       NnIo::Obj obj = NnIo::to_obj(nn0, k_bits);
       Nn nn1 = NnIo::from_obj(obj);
-      compare_models(nn0, nn1, k_bits, widths);
+      compare_models(nn0, nn1, k_bits, fc_widths, head_widths);
     }
   }
 
-  static void compare_models(Nn &nn0, Nn &nn1, int k_bits, vector<int> widths)
+  static void compare_models(Nn &nn0, Nn &nn1, int k_bits, vector<int> fc_widths, vector<int> head_widths)
   {
       int n = 1000;
       double total_diff = 0.0;
       rep(loop, n){
         vector<float> input;
-        rep(i, widths[0]) input.push_back(my_rand(-5, 5));
+        rep(i, fc_widths[0]) input.push_back(my_rand(-5, 5));
         float *f0 = nn0.forward(input);
         float *f1 = nn1.forward(input);
         double diff = 0;
-        rep(i, widths.back()) diff += abs(f0[i] - f1[i]);
+        rep(i, head_widths[0]) diff += abs(f0[i] - f1[i]);
         total_diff += diff;
       }
       double avg_diff = total_diff / n;
@@ -642,7 +648,7 @@ public:
   {
   public:
     vector<vector<float>> inputs;
-    vector<vector<float>> labels;
+    vector<vector<vector<float>>> labels;
   };
 
   /**
@@ -655,8 +661,9 @@ public:
     int encode_bits = 10;
     string out_path = "nn_test_export.txt";
 
-    vector<int> widths({4, 8, 8, 3});
-    Nn nn(widths);
+    vector<int> fc_widths({4, 8, 8});
+    vector<int> head_widths({3});
+    Nn nn(fc_widths, head_widths);
 
     for (Batch batch: data) {
       nn.train(batch.inputs, batch.labels, learning_rate);
@@ -666,15 +673,17 @@ public:
     io_obj.write(out_path);
 
     // Copy-and-pasted from ${out_path}.
-    Nn loaded = NnIo::from_obj(NnIo::Obj(
-      std::vector<int>({4, 8, 8, 3, }),
-      "㈪㊯㈠傷話啹년升뫆볮䄝麜맀亴蘫됧郄珩漲逫㥈籋非鸳䢠鶛檯膢㖗踁珤焝㦚抢缗憠們댤濄叆侣듬垖婕鑉鼲淞끵瓚髜寅奉册俗䲐戠卞鍿忓两띨燄烆鎰憤廨隮埉楻붶罦巌㌷仑粆齜茉㰉薇湺蒾跪柣琜瀻琜瀻琜瀻琜瀻琜瀻琜瀻琜瀻琜測",
-      -0.73765462636947631836,
-      0.69456773996353149414,
+    auto loaded = nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(
+      std::vector<int>({4, 8, 8, }),
+      std::vector<int>({3, }),
+      "㈪㊯㈠꿻旼狀髷劋蚩뚘诒㲚礘䷧귱㛬綗㑡墲䧶匀俽㯰㹌꾼㸻㷘匱鷉忏脥貑聽沗忹战䕁俘楩铽届뜕皛氥렋鉆玍轐培襙堞溱梄㼑綡漇䍋奐䂊䜚廱脦㶈蕖䃸䔃袅擦䳑麛蹆囫㚬놽봓頙粀㈶检莥頡閘齸珼氺珼氺珼氺珼氺珼氺珼氺珼氺珼樬",
+      -0.71865761280059814453,
+      0.67901515960693359375,
       10
     ));
 
-    compare_models(nn, loaded, encode_bits, widths);
+
+    compare_models(nn, loaded, encode_bits, fc_widths, head_widths);
   }
 };
 

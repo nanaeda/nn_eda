@@ -290,7 +290,7 @@ public:
 
     const int dim_inputs = 10;
     const int dim_outputs = 3;
-    Nn nn({dim_inputs, 50, 50}, {dim_outputs});
+    Trainer trainer({dim_inputs, 50, 50}, {dim_outputs});
     int num_epochs = 30;
     int num_iters = 512;
     int batch_size = 32;
@@ -321,10 +321,10 @@ public:
 
           labels.push_back({l});
 
-          nn.forward(inputs);
-          if(0.5 < nn.get_prediction(0, v[0].second)) success += 1;
+          trainer.forward(inputs);
+          if(0.5 < trainer.get_prediction(0, v[0].second)) success += 1;
         }
-        loss += nn.train(all_inputs, labels, 3e-2);
+        loss += trainer.train(all_inputs, labels, 3e-2);
       }
       double accuracy = (double) success / num_iters / batch_size;
       debug3(epoch, accuracy, loss / num_iters);
@@ -347,8 +347,8 @@ public:
     int target_update = 4;
     double learning_rate = 1e-3;
 
-    Nn policy({ranks, 32}, vector<int>(ranks + 1, 2));
-    Nn target = policy;
+    Trainer policy({ranks, 32}, vector<int>(ranks + 1, 2));
+    Trainer target = policy;
     vector<vector<float>> nn_inputs;
     rep(i, ranks){
       vector<float> v(ranks, 0);
@@ -436,9 +436,9 @@ public:
     vector<int> fc_widths({23, 45, 67, 89});
     vector<int> head_widths({5, 6, 7});
     srand(345);
-    Nn nn0(fc_widths, head_widths);
+    Trainer nn0(fc_widths, head_widths);
     srand(678);
-    Nn nn1(fc_widths, head_widths);
+    Trainer nn1(fc_widths, head_widths);
     compare_nn_outputs(nn0, nn0, fc_widths, head_widths, true);
     compare_nn_outputs(nn1, nn1, fc_widths, head_widths, true);
 
@@ -447,7 +447,7 @@ public:
     compare_nn_outputs(nn0, nn1, fc_widths, head_widths, true);
   }
 
-  static void compare_nn_outputs(Nn &nn0, Nn &nn1, vector<int> &fc_widths, vector<int> &head_widths, bool should_match)
+  static void compare_nn_outputs(Trainer &nn0, Trainer &nn1, vector<int> &fc_widths, vector<int> &head_widths, bool should_match)
   {
     int n = 1;
     rep(loop, n){
@@ -489,7 +489,7 @@ public:
   static void test_training(NnDataGenerator *generator, vector<int> fc_widths, vector<int> head_widths, double target, int num_epochs = 10)
   {
     srand(1234);
-    Nn nn(fc_widths, head_widths);
+    Trainer nn(fc_widths, head_widths);
 
     vector<double> losses;
     rep(epoch, num_epochs){
@@ -606,14 +606,14 @@ public:
     for(int k_bits = 16; 10 < k_bits; --k_bits){
       vector<int> fc_widths({20, 50, 50, 10});
       vector<int> head_widths({9, 4, 5});
-      Nn nn0(fc_widths, head_widths);
+      Trainer nn0(fc_widths, head_widths);
       string str = NnIo::serialize(nn0, k_bits);
-      Nn nn1 = NnIo::deserialize(str);
+      Trainer nn1 = Trainer(NnIo::deserialize(str));
       compare_models(nn0, nn1, k_bits, fc_widths, head_widths);
     }
   }
 
-  static void compare_models(Nn &nn0, Nn &nn1, int k_bits, vector<int> fc_widths, vector<int> head_widths)
+  static void compare_models(Trainer &nn0, Trainer &nn1, int k_bits, vector<int> fc_widths, vector<int> head_widths)
   {
       int n = 1000;
       double total_diff = 0.0;
@@ -653,7 +653,7 @@ public:
 
     vector<int> fc_widths({4, 8, 8});
     vector<int> head_widths({3, 2, 4});
-    Nn nn(fc_widths, head_widths);
+    Trainer nn(fc_widths, head_widths);
 
     for (Batch batch: data) {
       nn.train(batch.inputs, batch.labels, learning_rate);
@@ -666,7 +666,7 @@ public:
     }
 
     // Copy-and-pasted from ${out_path}.
-    auto loaded = nn_eda::NnIo::deserialize("3 4 8 8 3 3 2 4 -0.6941325068473815918 0.66561752557754516602 10 ㈪㋥㈠냛蘄牀髪儋몬래꿝㩺贛䰼㧛㒬嶝㈠邲䡖図乼밈㱌螣㰻嗬凑槑廏䔜貱䱯毷㿧愷땣乘䥢镝假렕續殆㯧銦螄辯갅襹㰎渐범㴑熧湧孍堏蒔䕚狤脦冚蕕鴆䍃䱷朄撽雛躙守拷鲉䣎酙뢂㴕咥肄㠖轙徖芏邋插㒦넮갇縗趢舿襥鈻륓滵朵㹉馒萦볜䦓몾浵雗䀳齌螞崛䞆뫚㴸蓱髞挦獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼娬");
+    auto loaded = Trainer(nn_eda::NnIo::deserialize("3 4 8 8 3 3 2 4 -0.6941325068473815918 0.66561752557754516602 10 ㈪㋥㈠냛蘄牀髪儋몬래꿝㩺贛䰼㧛㒬嶝㈠邲䡖図乼밈㱌螣㰻嗬凑槑廏䔜貱䱯毷㿧愷땣乘䥢镝假렕續殆㯧銦螄辯갅襹㰎渐범㴑熧湧孍堏蒔䕚狤脦冚蕕鴆䍃䱷朄撽雛躙守拷鲉䣎酙뢂㴕咥肄㠖轙徖芏邋插㒦넮갇縗趢舿襥鈻륓滵朵㹉馒萦볜䦓몾浵雗䀳齌螞崛䞆뫚㴸蓱髞挦獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼娬"));
 
     compare_models(nn, loaded, encode_bits, fc_widths, head_widths);
   }

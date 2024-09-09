@@ -70,24 +70,6 @@ namespace nn_eda
       return last_out[head_offsets[head_i] + index];
     }
 
-    vi all_widths;
-    vi fc_widths;
-    vi head_widths;
-    vi head_offsets;
-
-    vi b_offsets;
-    vi w_offsets;
-
-    float *ws;
-    float *bs;
-    float *outs;
-    float *last_out;
-
-    int get_w_offset(int i0, int i1)
-    {
-      return w_offsets[i0] + i1 * all_widths[i0 + 1];
-    }
-
     void forward(const vf &v)
     {
       assert(all_widths[0] == v.size());
@@ -140,7 +122,26 @@ namespace nn_eda
       }
     }
 
-  private:
+    vi fc_widths;
+    vi head_widths;
+
+  protected:
+
+    vi all_widths;
+    vi head_offsets;
+
+    vi b_offsets;
+    vi w_offsets;
+
+    float *ws;
+    float *bs;
+    float *outs;
+    float *last_out;
+
+    int get_w_offset(int i0, int i1)
+    {
+      return w_offsets[i0] + i1 * all_widths[i0 + 1];
+    }
 
     void set_widths(const vi &fc_widths, const vi &head_widths)
     {
@@ -192,36 +193,239 @@ namespace nn_eda
 
   };
 
-  class Nn : public Inferrer
+  class Scaler
   {
   public:
-    Nn(const vi &fc_widths, const vi &head_widths) : Inferrer(fc_widths, head_widths)
+    Scaler(float mini, float maxi) : 
+      mini(mini + ((mini == maxi) ? 1e-6 : 0)),
+      maxi(maxi - ((mini == maxi) ? 1e-6 : 0))
+    {
+      assert(mini <= maxi);
+    }
+
+    float scale(float f) 
+    {
+      return (f - mini) / (maxi - mini);
+    }
+
+    float unscale(float f)
+    {
+      assert(0 <= f && f <= 1.0);
+      return (maxi - mini) * f + mini;
+    }
+
+    static Scaler create(const vf &v) 
+    {
+      return Scaler(
+        *min_element(v.begin(), v.end()),
+        *max_element(v.begin(), v.end())
+      );
+    }
+
+    float mini;
+    float maxi;
+  };
+
+  // https://bowwowforeach.hatenablog.com/entry/2022/07/05/195417
+  int CHAR_RANGES[3][2] = {
+    {0x3220, 0x4DB4},
+    {0x4DC0, 0x9FEE},
+    {0xAC00, 0xD7A2},
+  };
+
+  int CHAR_RANGE_LENGTHS[3] = {
+    CHAR_RANGES[0][1] - CHAR_RANGES[0][0], 
+    CHAR_RANGES[1][1] - CHAR_RANGES[1][0], 
+    CHAR_RANGES[2][1] - CHAR_RANGES[2][0],
+  };
+
+  class Base32768 
+  {
+  public:
+    static string encode_k_bit_integer(const vi &v, int k_bits)
+    {
+      assert(k_bits <= 16); // to avoid overflow.
+
+      int mask_k = (1 << k_bits) - 1;
+      vi c16s;
+
+      c16s.push_back(k_bits);
+
+      c16s.push_back(v.size() & MASK_15);
+      c16s.push_back(v.size() >> 15);
+      
+      for (int i: convert_base(v, k_bits, 15)) c16s.push_back(i);
+
+      u16string u16s = to_u16string(c16s);
+
+      return wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t>().to_bytes(u16s);
+    }
+
+    static vi decode(const string &u8s)
+    {
+      u16string u16s = wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t>().from_bytes(u8s);
+
+      int k_bits = c2i(u16s[0]);
+      assert(k_bits <= 16);
+
+      int length = c2i(u16s[1]) | (c2i(u16s[2]) << 15);
+      
+      vi v;
+      for (int i = 3; i < u16s.size(); ++i) v.push_back(c2i(u16s[i]));
+
+      vi res = convert_base(v, 15, k_bits);
+      while (length < res.size()) res.pop_back();
+
+      return res;
+    }
+
+  private:
+
+    static constexpr int MASK_15 = (1 << 15) - 1;
+
+    static vi convert_base(const vi &v, int curr_base_bits, int next_base_bits) 
+    {
+      vi res;
+
+      int curr_mask = (1 << curr_base_bits) - 1;
+      int cur = 0;
+      int num_bits = 0;
+      for (int i: v) {
+        cur = (cur << curr_base_bits) | i;
+        num_bits += curr_base_bits;
+        while (next_base_bits <= num_bits) {
+          int shift = num_bits - next_base_bits;
+          int t = cur >> shift;
+          res.push_back(t);
+          num_bits -= next_base_bits;
+          cur ^= t << shift;
+        }
+      }
+      {
+        // 0-filling.
+        int shift = next_base_bits - num_bits;
+        int t = cur << shift;
+        res.push_back(t);
+      }
+      return res;
+    }
+
+    static u16string to_u16string(const vi &v)
+    {
+      char16_t *a = new char16_t[v.size() + 1];
+
+      FOR(i, v.size()) a[i] = i2c(v[i]);
+
+      a[v.size()] = 0; // terminator.
+
+      u16string res(a);
+
+      delete [] a;
+
+      return res;
+    }
+
+    static char16_t i2c(int t)
+    {
+      assert(0 <= t && t <= MASK_15);
+
+      FOR(i, 3){
+        if (t < CHAR_RANGE_LENGTHS[i]) return (char16_t) (t + CHAR_RANGES[i][0]);
+        t -= CHAR_RANGE_LENGTHS[i];
+      }
+
+      assert(false);
+    }
+
+    static int c2i(char16_t t)
+    {
+      int res = 0;
+      FOR(i, 3){
+        if (CHAR_RANGES[i][0] <= t && t <= CHAR_RANGES[i][1]) return res + (t - CHAR_RANGES[i][0]);
+        res += CHAR_RANGE_LENGTHS[i];
+      }
+
+      assert(false);
+    }
+  };
+
+  class NnIo
+  {
+  public:
+  
+    static Inferrer deserialize(const string &str)
+    {
+      stringstream ss(str);
+
+      int len;
+
+      ss >> len;
+      vi fc_widths(len);
+      FOR(i, len) ss >> fc_widths[i];
+
+      ss >> len;
+      vi head_widths(len);
+      FOR(i, len) ss >> head_widths[i];
+
+      float w_mini, w_maxi;
+      int k_bits;
+      string w_str;
+      ss >> w_mini >> w_maxi >> k_bits >> w_str;
+
+      vi int_weights = Base32768::decode(w_str);
+
+      Scaler scaler(w_mini, w_maxi);
+      vf weights;
+      for(int w: int_weights) weights.push_back(scaler.unscale((float) w / ((1 << k_bits) - 1)));
+
+      Inferrer res(fc_widths, head_widths);
+      res.import_weights(weights);
+      return res;
+    }
+
+    static string serialize(Inferrer &inferrer, int k_bits) 
+    {
+      vf weights = inferrer.export_weights();
+      Scaler scaler = Scaler::create(weights);
+      vi int_weights;
+      for(float w: weights) int_weights.push_back((int) (scaler.scale(w) * ((1 << k_bits) - 1) + 0.5));
+      string w_str = Base32768::encode_k_bit_integer(int_weights, k_bits);
+
+      stringstream ss;
+      ss << setprecision(20);
+      ss << inferrer.fc_widths.size() << " ";
+      for(int w: inferrer.fc_widths) ss << w << " ";
+      ss << inferrer.head_widths.size() << " ";
+      for(int w: inferrer.head_widths) ss << w << " ";
+      ss << scaler.mini << " " << scaler.maxi << " " << k_bits << " " << w_str;
+      return ss.str();
+    }
+  };
+
+
+// CUT_BEGIN
+
+  class Trainer : public Inferrer
+  {
+  public:
+    Trainer(const vi &fc_widths, const vi &head_widths) : Inferrer(fc_widths, head_widths)
     {
       allocate_memory();
     }
 
-    void allocate_memory()
-    {
-      grad_ws = new float[w_offsets.back()];
-      grad_bs = new float[b_offsets.back()];
-      grad_os = new float[b_offsets.back()];
-      momentum_ws = new float[w_offsets.back()];
-      momentum_bs = new float[b_offsets.back()];
-      memset(grad_ws, 0, sizeof(float) * w_offsets.back());
-      memset(grad_bs, 0, sizeof(float) * b_offsets.back());
-      memset(grad_os, 0, sizeof(float) * b_offsets.back());
-      memset(momentum_ws, 0, sizeof(float) * w_offsets.back());
-      memset(momentum_bs, 0, sizeof(float) * b_offsets.back());
-    }
-
-    Nn(const Nn &nn) : Inferrer(nn)
+    Trainer(const Trainer &trainer) : Inferrer(trainer)
     {
       allocate_memory();
     }
 
-    Nn& operator=(const Nn &nn)
+    Trainer(const Inferrer &inferrer) : Inferrer(inferrer)
     {
-      Inferrer::operator=(nn);
+      allocate_memory();
+    }
+
+    Trainer& operator=(const Trainer &trainer)
+    {
+      Inferrer::operator=(trainer);
 
       free_memory();
       allocate_memory();
@@ -229,7 +433,7 @@ namespace nn_eda
       return *this;
     }
 
-    ~Nn()
+    ~Trainer()
     {
       free_memory();
     }
@@ -351,6 +555,20 @@ namespace nn_eda
     float *momentum_ws;
     float *momentum_bs;
 
+    void allocate_memory()
+    {
+      grad_ws = new float[w_offsets.back()];
+      grad_bs = new float[b_offsets.back()];
+      grad_os = new float[b_offsets.back()];
+      momentum_ws = new float[w_offsets.back()];
+      momentum_bs = new float[b_offsets.back()];
+      memset(grad_ws, 0, sizeof(float) * w_offsets.back());
+      memset(grad_bs, 0, sizeof(float) * b_offsets.back());
+      memset(grad_os, 0, sizeof(float) * b_offsets.back());
+      memset(momentum_ws, 0, sizeof(float) * w_offsets.back());
+      memset(momentum_bs, 0, sizeof(float) * b_offsets.back());
+    }
+
     void free_memory()
     {
       delete [] grad_ws;
@@ -362,263 +580,7 @@ namespace nn_eda
 
   };
 
-  class Scaler
-  {
-  public:
-    Scaler(float mini, float maxi)
-    {
-      assert(mini <= maxi);
-      this->mini = mini;
-      this->maxi = maxi;
-      if(mini == maxi){
-        this->mini -= 1e-6;
-        this->maxi += 1e-6;
-      }
-    }
-
-    float scale(float f) 
-    {
-      return (f - mini) / (maxi - mini);
-    }
-
-    float unscale(float f)
-    {
-      assert(0 <= f && f <= 1.0);
-      return (maxi - mini) * f + mini;
-    }
-
-    static Scaler create(const vf &v) 
-    {
-      float mini = v[0];
-      float maxi = v[0];
-      for (float f: v) {
-        mini = min(mini, f);
-        maxi = max(maxi, f);
-      }
-      return Scaler(mini, maxi);
-    }
-
-    float mini;
-    float maxi;
-  };
-
-  // https://bowwowforeach.hatenablog.com/entry/2022/07/05/195417
-  int CHAR_RANGES[3][2] = {
-    {0x3220, 0x4DB4},
-    {0x4DC0, 0x9FEE},
-    {0xAC00, 0xD7A2},
-  };
-
-  int CHAR_RANGE_LENGTHS[3] = {
-    CHAR_RANGES[0][1] - CHAR_RANGES[0][0],
-    CHAR_RANGES[1][1] - CHAR_RANGES[1][0],
-    CHAR_RANGES[2][1] - CHAR_RANGES[2][0],
-  };
-
-  class Base32768 
-  {
-  public:
-    static string encode_k_bit_integer(const vi &v, int k_bits)
-    {
-      assert(k_bits <= 16); // to avoid overflow.
-
-      int mask_k = (1 << k_bits) - 1;
-      vi c16s;
-
-      c16s.push_back(k_bits);
-
-      c16s.push_back(v.size() & MASK_15);
-      c16s.push_back(v.size() >> 15);
-      
-      for (int i: convert_base(v, k_bits, 15)) c16s.push_back(i);
-
-      u16string u16s = to_u16string(c16s);
-
-      wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> converter;
-      return converter.to_bytes(u16s);
-    }
-
-    static vi decode(const string &u8s)
-    {
-      wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> converter;
-      u16string u16s = converter.from_bytes(u8s);
-
-      int k_bits = c2i(u16s[0]);
-      assert(k_bits <= 16);
-
-      int length = c2i(u16s[1]) | (c2i(u16s[2]) << 15);
-      
-      vi v;
-      for (int i = 3; i < u16s.size(); ++i) v.push_back(c2i(u16s[i]));
-
-      vi res = convert_base(v, 15, k_bits);
-      while (length < res.size()) res.pop_back();
-
-      return res;
-    }
-
-  private:
-
-    static constexpr int MASK_15 = (1 << 15) - 1;
-
-    static vi convert_base(const vi &v, int curr_base_bits, int next_base_bits) 
-    {
-      vi res;
-
-      int curr_mask = (1 << curr_base_bits) - 1;
-      int cur = 0;
-      int num_bits = 0;
-      for (int i: v) {
-        cur = (cur << curr_base_bits) | i;
-        num_bits += curr_base_bits;
-        while (next_base_bits <= num_bits) {
-          int shift = num_bits - next_base_bits;
-          int t = cur >> shift;
-          res.push_back(t);
-          num_bits -= next_base_bits;
-          cur ^= t << shift;
-        }
-      }
-      {
-        // 0-filling.
-        int shift = next_base_bits - num_bits;
-        int t = cur << shift;
-        res.push_back(t);
-      }
-      return res;
-    }
-
-    static u16string to_u16string(const vi &v)
-    {
-      char16_t *a = new char16_t[v.size() + 1];
-
-      FOR(i, v.size()) a[i] = i2c(v[i]);
-
-      a[v.size()] = 0; // terminator.
-
-      u16string res(a);
-
-      delete [] a;
-
-      return res;
-    }
-
-    static char16_t i2c(int t)
-    {
-      assert(0 <= t && t <= MASK_15);
-
-      FOR(i, 3){
-        if (t < CHAR_RANGE_LENGTHS[i]) return (char16_t) (t + CHAR_RANGES[i][0]);
-        t -= CHAR_RANGE_LENGTHS[i];
-      }
-
-      cout << "something went wrong... : " << t << endl;
-      assert(false);
-      exit(0);
-    }
-
-    static int c2i(char16_t t)
-    {
-      int res = 0;
-      FOR(i, 3){
-        if (CHAR_RANGES[i][0] <= t && t <= CHAR_RANGES[i][1]) return res + (t - CHAR_RANGES[i][0]);
-        res += CHAR_RANGE_LENGTHS[i];
-      }
-
-      assert(false);
-    }
-  };
-
-  class NnIo
-  {
-  public:
-    class Obj
-    {
-    public:
-
-      Obj() {}
-
-      Obj(
-        vi fc_widths,
-        vi head_widths,
-        string w_str,
-        float w_mini,
-        float w_maxi,
-        int k_bits
-      ) : fc_widths(fc_widths), head_widths(head_widths), w_str(w_str), w_mini(w_mini), w_maxi(w_maxi), k_bits(k_bits) {}
-
-      vi fc_widths;
-      vi head_widths;
-      string w_str;
-      float w_mini;
-      float w_maxi;
-      int k_bits;
-
-      string to_string()
-      {
-        stringstream ss;
-        ss << setprecision(20);
-        ss << fc_widths.size() << " ";
-        for(int w: fc_widths) ss << w << " ";
-        ss << head_widths.size() << " ";
-        for(int w: head_widths) ss << w << " ";
-        ss << w_mini << " " << w_maxi << " " << k_bits << " " << w_str;
-
-        return ss.str();
-      }
-
-      static Obj from_string(const string &s)
-      {
-        Obj res;
-
-        stringstream ss;
-        ss << s;
-
-        int len;
-        ss >> len;
-        res.fc_widths = vi(len);
-        FOR(i, len) ss >> res.fc_widths[i];
-        ss >> len;
-        res.head_widths = vi(len);
-        FOR(i, len) ss >> res.head_widths[i];
-
-        ss >> res.w_mini >> res.w_maxi >> res.k_bits >> res.w_str;
-
-        return res;
-      }
-    };
-
-    static Nn deserialize(string str)
-    {
-      Obj obj = Obj::from_string(str);
-      vi int_weights = Base32768::decode(obj.w_str);
-
-      Scaler scaler(obj.w_mini, obj.w_maxi);
-      vf weights;
-      for(int w: int_weights) weights.push_back(scaler.unscale((float) w / ((1 << obj.k_bits) - 1)));
-
-      Nn nn(obj.fc_widths, obj.head_widths);
-      nn.import_weights(weights);
-      return nn;
-    }
-
-    static string serialize(Nn &nn, int k_bits) 
-    {
-      vf weights = nn.export_weights();
-      Scaler scaler = Scaler::create(weights);
-      vi int_weights;
-      for(float w: weights) int_weights.push_back((int) (scaler.scale(w) * ((1 << k_bits) - 1) + 0.5));
-
-      return Obj(
-        nn.fc_widths,
-        nn.head_widths,
-        Base32768::encode_k_bit_integer(int_weights, k_bits),
-        scaler.mini,
-        scaler.maxi,
-        k_bits
-      ).to_string();
-    }
-  };
+// CUT_END
 
   #undef FOR
   #pragma pop_macro("FOR")

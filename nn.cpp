@@ -88,7 +88,7 @@ namespace nn_eda
       return w_offsets[i0] + i1 * all_widths[i0 + 1];
     }
 
-    float* forward(vf &v)
+    void forward(const vf &v)
     {
       assert(all_widths[0] == v.size());
 
@@ -138,8 +138,6 @@ namespace nn_eda
         }
         FOR(i, head_widths[head_i]) last_out_ptr[i] /= total;
       }
-
-      return last_out;
     }
 
   private:
@@ -371,7 +369,11 @@ namespace nn_eda
     {
       assert(mini <= maxi);
       this->mini = mini;
-      this->maxi = (mini == maxi) ? (mini + 1e-6) : maxi;
+      this->maxi = maxi;
+      if(mini == maxi){
+        this->mini -= 1e-6;
+        this->maxi += 1e-6;
+      }
     }
 
     float scale(float f) 
@@ -385,7 +387,7 @@ namespace nn_eda
       return (maxi - mini) * f + mini;
     }
 
-    static Scaler create(vf &v) 
+    static Scaler create(const vf &v) 
     {
       float mini = v[0];
       float maxi = v[0];
@@ -416,7 +418,7 @@ namespace nn_eda
   class Base32768 
   {
   public:
-    static string encode_k_bit_integer(vi &v, int k_bits)
+    static string encode_k_bit_integer(const vi &v, int k_bits)
     {
       assert(k_bits <= 16); // to avoid overflow.
 
@@ -436,7 +438,7 @@ namespace nn_eda
       return converter.to_bytes(u16s);
     }
 
-    static vi decode(string &u8s)
+    static vi decode(const string &u8s)
     {
       wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> converter;
       u16string u16s = converter.from_bytes(u8s);
@@ -459,7 +461,7 @@ namespace nn_eda
 
     static constexpr int MASK_15 = (1 << 15) - 1;
 
-    static vi convert_base(vi &v, int curr_base_bits, int next_base_bits) 
+    static vi convert_base(const vi &v, int curr_base_bits, int next_base_bits) 
     {
       vi res;
 
@@ -486,7 +488,7 @@ namespace nn_eda
       return res;
     }
 
-    static u16string to_u16string(vi &v)
+    static u16string to_u16string(const vi &v)
     {
       char16_t *a = new char16_t[v.size() + 1];
 
@@ -534,6 +536,8 @@ namespace nn_eda
     {
     public:
 
+      Obj() {}
+
       Obj(
         vi fc_widths,
         vi head_widths,
@@ -550,26 +554,43 @@ namespace nn_eda
       float w_maxi;
       int k_bits;
 
-      void write(string path)
+      string to_string()
       {
-        ofstream ofs(path);
-        ofs << setprecision(20);
-        ofs << "nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(" << endl;
-        ofs << "std::vector<int>({";
-        for (int width: fc_widths) ofs << width << ", ";
-        ofs << "})," << endl;
-        ofs << "std::vector<int>({";
-        for (int width: head_widths) ofs << width << ", ";
-        ofs << "})," << endl;
-        ofs << "\"" << w_str << "\"," << endl;
-        ofs << w_mini << "," << endl;
-        ofs << w_maxi << "," << endl;
-        ofs << k_bits << "));" << endl;
+        stringstream ss;
+        ss << setprecision(20);
+        ss << fc_widths.size() << " ";
+        for(int w: fc_widths) ss << w << " ";
+        ss << head_widths.size() << " ";
+        for(int w: head_widths) ss << w << " ";
+        ss << w_mini << " " << w_maxi << " " << k_bits << " " << w_str;
+
+        return ss.str();
+      }
+
+      static Obj from_string(const string &s)
+      {
+        Obj res;
+
+        stringstream ss;
+        ss << s;
+
+        int len;
+        ss >> len;
+        res.fc_widths = vi(len);
+        FOR(i, len) ss >> res.fc_widths[i];
+        ss >> len;
+        res.head_widths = vi(len);
+        FOR(i, len) ss >> res.head_widths[i];
+
+        ss >> res.w_mini >> res.w_maxi >> res.k_bits >> res.w_str;
+
+        return res;
       }
     };
 
-    static Nn from_obj(Obj obj) 
+    static Nn deserialize(string str)
     {
+      Obj obj = Obj::from_string(str);
       vi int_weights = Base32768::decode(obj.w_str);
 
       Scaler scaler(obj.w_mini, obj.w_maxi);
@@ -581,7 +602,7 @@ namespace nn_eda
       return nn;
     }
 
-    static Obj to_obj(Nn &nn, int k_bits) 
+    static string serialize(Nn &nn, int k_bits) 
     {
       vf weights = nn.export_weights();
       Scaler scaler = Scaler::create(weights);
@@ -595,51 +616,8 @@ namespace nn_eda
         scaler.mini,
         scaler.maxi,
         k_bits
-      );
+      ).to_string();
     }
-
-    static void write_raw(Nn &nn, string path)
-    {
-      ofstream ofs(path, ios::binary);
-      int num_fc = nn.fc_widths.size();
-      ofs.write(reinterpret_cast<const char*>(&num_fc), sizeof(int));
-      for (int width: nn.fc_widths) ofs.write(reinterpret_cast<const char*>(&width), sizeof(int));
-
-      int num_head = nn.head_widths.size();
-      ofs.write(reinterpret_cast<const char*>(&num_head), sizeof(int));
-      for (int width: nn.head_widths) ofs.write(reinterpret_cast<const char*>(&width), sizeof(int));
-
-      vf weights = nn.export_weights();
-      int num_weights = weights.size();
-      ofs.write(reinterpret_cast<const char*>(&num_weights), sizeof(int));
-      for (float w: weights) ofs.write(reinterpret_cast<const char*>(&w), sizeof(float));
-    }
-
-    static Nn read_raw(string path)
-    {
-      ifstream ifs(path, ios::binary);
-
-      auto read_vec = [&ifs](){
-        int num;
-        ifs.read(reinterpret_cast<char*>(&num), sizeof(int));
-        vi v(num);
-        FOR(i, num) ifs.read(reinterpret_cast<char*>(&v[i]), sizeof(int));
-        return v;
-      };
-
-      vi fc_widths = read_vec();
-      vi head_widths = read_vec();
-
-      Nn nn(fc_widths, head_widths);
-
-      int num_weights;
-      ifs.read(reinterpret_cast<char*>(&num_weights), sizeof(int));
-      vf weights(num_weights);
-      FOR(i, num_weights) ifs.read(reinterpret_cast<char*>(&weights[i]), sizeof(float));
-      nn.import_weights(weights);
-      return nn;
-    }
-  
   };
 
   #undef FOR

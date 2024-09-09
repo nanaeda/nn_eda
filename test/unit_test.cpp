@@ -131,7 +131,7 @@ public:
   {
     vector<float> v({10.0, 10.0, 10.0});
     Scaler scaler = Scaler::create(v);
-    Assert::equals(0.0, scaler.scale(10.0));
+    Assert::equals(0.5, scaler.scale(10.0));
   }
 
   static void test_scale_2()
@@ -321,8 +321,8 @@ public:
 
           labels.push_back({l});
 
-          float *f = nn.forward(inputs);
-          if(0.5 < f[v[0].second]) success += 1;
+          nn.forward(inputs);
+          if(0.5 < nn.get_prediction(0, v[0].second)) success += 1;
         }
         loss += nn.train(all_inputs, labels, 3e-2);
       }
@@ -500,8 +500,8 @@ public:
       rep(loop, n){
         vector<float> input = generator->gen_input(fc_widths[0]);
         vector<float> label = generator->gen_label(input, head_widths[0]);
-        float *pred = nn.forward(input);
-        rep(i, sz(label)) total_loss += (-label[i] * log(max(pred[i], 1e-6f)));
+        nn.forward(input);
+        rep(i, sz(label)) total_loss += (-label[i] * log(max(nn.get_prediction(0, i), 1e-6f)));
       }
       losses.push_back(total_loss / n);
       debug(losses.back());
@@ -599,18 +599,6 @@ public:
     declare_test_name("NnIoTester");
     run_test(test_obj_creation);
     run_test(test_io);
-    run_test(test_raw_io);
-  }
-
-  static void test_raw_io()
-  { 
-    string path = "nn_io_test.txt";
-    vector<int> fc_widths({20, 50, 50, 10});
-    vector<int> head_widths({5, 9, 4});
-    Nn nn0(fc_widths, head_widths);
-    NnIo::write_raw(nn0, path);
-    Nn nn1 = NnIo::read_raw(path);
-    NnTester::compare_nn_outputs(nn0, nn1, fc_widths, head_widths, true);
   }
 
   static void test_obj_creation()
@@ -619,8 +607,8 @@ public:
       vector<int> fc_widths({20, 50, 50, 10});
       vector<int> head_widths({9, 4, 5});
       Nn nn0(fc_widths, head_widths);
-      NnIo::Obj obj = NnIo::to_obj(nn0, k_bits);
-      Nn nn1 = NnIo::from_obj(obj);
+      string str = NnIo::serialize(nn0, k_bits);
+      Nn nn1 = NnIo::deserialize(str);
       compare_models(nn0, nn1, k_bits, fc_widths, head_widths);
     }
   }
@@ -632,10 +620,12 @@ public:
       rep(loop, n){
         vector<float> input;
         rep(i, fc_widths[0]) input.push_back(my_rand(-5, 5));
-        float *f0 = nn0.forward(input);
-        float *f1 = nn1.forward(input);
+        nn0.forward(input);
+        nn1.forward(input);
         double diff = 0;
-        rep(i, head_widths[0]) diff += abs(f0[i] - f1[i]);
+        rep(head_i, head_widths.size())rep(i, head_widths[head_i]){
+          diff += abs(nn0.get_prediction(head_i, i) - nn1.get_prediction(head_i, i));
+        }
         total_diff += diff;
       }
       double avg_diff = total_diff / n;
@@ -662,26 +652,21 @@ public:
     string out_path = "nn_test_export.txt";
 
     vector<int> fc_widths({4, 8, 8});
-    vector<int> head_widths({3});
+    vector<int> head_widths({3, 2, 4});
     Nn nn(fc_widths, head_widths);
 
     for (Batch batch: data) {
       nn.train(batch.inputs, batch.labels, learning_rate);
     }
 
-    NnIo::Obj io_obj = NnIo::to_obj(nn, encode_bits);
-    io_obj.write(out_path);
+    {
+      string serialized = NnIo::serialize(nn, encode_bits);
+      ofstream ofs(out_path);
+      ofs << serialized;
+    }
 
     // Copy-and-pasted from ${out_path}.
-    auto loaded = nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(
-      std::vector<int>({4, 8, 8, }),
-      std::vector<int>({3, }),
-      "㈪㊯㈠꿻旼狀髷劋蚩뚘诒㲚礘䷧귱㛬綗㑡墲䧶匀俽㯰㹌꾼㸻㷘匱鷉忏脥貑聽沗忹战䕁俘楩铽届뜕皛氥렋鉆玍轐培襙堞溱梄㼑綡漇䍋奐䂊䜚廱脦㶈蕖䃸䔃袅擦䳑麛蹆囫㚬놽봓頙粀㈶检莥頡閘齸珼氺珼氺珼氺珼氺珼氺珼氺珼氺珼樬",
-      -0.71865761280059814453,
-      0.67901515960693359375,
-      10
-    ));
-
+    auto loaded = nn_eda::NnIo::deserialize("3 4 8 8 3 3 2 4 -0.6941325068473815918 0.66561752557754516602 10 ㈪㋥㈠냛蘄牀髪儋몬래꿝㩺贛䰼㧛㒬嶝㈠邲䡖図乼밈㱌螣㰻嗬凑槑廏䔜貱䱯毷㿧愷땣乘䥢镝假렕續殆㯧銦螄辯갅襹㰎渐범㴑熧湧孍堏蒔䕚狤脦冚蕕鴆䍃䱷朄撽雛躙守拷鲉䣎酙뢂㴕咥肄㠖轙徖芏邋插㒦넮갇縗趢舿襥鈻륓滵朵㹉馒萦볜䦓몾浵雗䀳齌螞崛䞆뫚㴸蓱髞挦獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼尶獼娬");
 
     compare_models(nn, loaded, encode_bits, fc_widths, head_widths);
   }
@@ -694,8 +679,6 @@ int main()
   Base32768Tester::test();
   NnIoTester::test();
   NnTester::test();
-
-  // Assert::equals(2.0, 1.0, 0.5);
 }
 
 

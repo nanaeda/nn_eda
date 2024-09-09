@@ -52,22 +52,23 @@ double validate_model(Nn &nn, int dim, int n)
   rep(loop, n){
     int target = get_target(dim);
     vector<float> input = gen_input(dim, target);
-    total_prob += nn.forward(input)[target];
+    nn.forward(input);
+    total_prob += nn.get_prediction(0, target);
   }
   double avg_prob = total_prob / n;
   return avg_prob;
 }
 
-Nn train_model(vector<int> widths, int num_epochs, int num_samples, int batch_size, double learning_rate)
+Nn train_model(vector<int> fc_widths, vector<int> head_widths, int num_epochs, int num_samples, int batch_size, double learning_rate)
 {
   srand(2345);
 
-  Nn nn(widths);
+  Nn nn(fc_widths, head_widths);
 
   rep(epoch, num_epochs){
     // validation
     {
-      double avg_prob = validate_model(nn, widths[0], num_samples);
+      double avg_prob = validate_model(nn, fc_widths[0], num_samples);
       debug2(epoch, avg_prob);
     }
 
@@ -75,11 +76,11 @@ Nn train_model(vector<int> widths, int num_epochs, int num_samples, int batch_si
     {
       rep(loop, num_samples / batch_size){
         vector<vector<float>> inputs;
-        vector<vector<float>> labels;
+        vector<vector<vector<float>>> labels;
         rep(i, batch_size){
-          int target = get_target(widths[0]);
-          inputs.push_back(gen_input(widths[0], target));
-          labels.push_back(gen_label(widths[0], target));
+          int target = get_target(fc_widths[0]);
+          inputs.push_back(gen_input(fc_widths[0], target));
+          labels.push_back({gen_label(fc_widths[0], target)});
         }
         nn.train(inputs, labels, learning_rate);
       }
@@ -91,10 +92,11 @@ Nn train_model(vector<int> widths, int num_epochs, int num_samples, int batch_si
 
 int main()
 {
-  vector<int> widths({10, 50, 50, 10});
+  vector<int> fc_widths({10, 50, 50});
+  vector<int> head_widths({10});
   int num_epochs = 100;
   int num_samples = (int) 1e5;
   int batch_size = 32;
   double learning_rate = 3e-3;
-  train_model(widths, num_epochs, num_samples, batch_size, learning_rate);
+  train_model(fc_widths, head_widths, num_epochs, num_samples, batch_size, learning_rate);
 }

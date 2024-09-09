@@ -1,58 +1,52 @@
-NnEda is a personal C++ neural network library developed for dedicated usage in online programming competitions. Any backward-compatibility isn't guaranteed because code length is a critical factor in programming competitions and legacy functions get removed immediately. So, it's highly recommended to use this library as a reference for your own implementation.
+NnEda is my personal C++ neural network library for the dedicated usage in online programming competitions. Any backward-compatibility isn't guaranteed because code length is a critical factor in programming competitions and legacy functions are removed immediately. So, it's highly recommended to use this library as a reference for your own implementation.
 
 Tested only on CodinGame.
 
 
 ## Usage of nn.cpp
 
-The library exports trained networks as a string to be later embedded into source code. That's the only use case this library supports, and that's what the following code example does.
+This library only supports MLP models with softmax multi-head outputs.
+The trained model can be exported as a string.
 
-### Train and Export
-```
+### Example Code
 
-// Only an MLP architecture is supported.
-// Softmax is applied to the last layer.
-// When a single probability score is needed, please let the last layer have 2 outputs.
-// Then, the first output can be used as the probability.
-vector<int> widths({4, 8, 8, 3});
-nn_eda::Nn nn(widths);
-
-// A momentum SGD optimizer is implemented..
-for (Batch batch: data) {
-  nn.train(batch.inputs, batch.labels, learning_rate);
-}
-
-// Models weights are encoded to a string using a Base64-wise encoding technique.
-// The details are here: https://bowwowforeach.hatenablog.com/entry/2022/07/05/195417
-nn_eda::NnIo::Obj io_obj = nn_eda::NnIo::to_obj(nn, encode_bits);
-io_obj.write(out_path);
-
-// A simple file IO is also supported.
-nn_eda::NnIo::write_raw(nn, raw_out_path);
-```
-
-
-### Embed and Inference
+The following is an example code for a boardgame, reversi.
 
 ```
 
-// This is what the “write” method outputs.
-// Copy-and-paste it from the file.
-nn_eda::Nn nn = nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(
-  std::vector<int>({4, 8, 8, 3, }),
-  "㈪㊯㈠劧梩犹坜憐㨾嬆蓭䃡붌虷夗爷땝闂俻䃈縚朐㲚鵙䀖潈䶡鍗亶騀뇃祤늒査돥䯂礷뇖끈櫨념櫙㶼䉩㟀粃㮝睾㳝莺远缯佐蓛津䒔蕏괒僃洱䂩婞㚣壀꾻蟖䛖㤼甬喽凐뭢觎裬邛鱫餍矼杻㌀㘟鲉鞧漻吔漻吔漻吔漻吔漻吔漻吔漻吔漻刬",
-  -0.66578274965286254883,
-  0.72993195056915283203,
-  10
-));
+// Create a model.
+vector<int> fc_widths = {64, 256, 128};
+vector<int> head_widths = {2, 64}; // (value output, policy output)
+Trainer trainer(fc_widths, head_widths);
 
-// A simple file IO is also supported.
-nn_eda::Nn nn = NnIo::read_raw(path);
+// Train one sample.
+float learning_rate = 1e-3;
 
-// Perform inference.
-// The “forward” method always returns the same float array.
-// So, the returned values need to be used or saved before the next call.
-float* output = nn.forward_softmax(input)
+vector<float> reversi_board(64);
+
+float win_rate = ...;
+int selected_move = ...;
+vector<float> value_label = {1 - win_rate, win_rate}; // Sigmoid is achieved by Softmax with 2 outputs.
+vector<float> policy_label = vector<float>(64, 0);
+policy_label[selected_move] = 1.0;
+
+trainer.train({reversi_board}, {{value_label, policy_label}}, learning_rate);
+
+// Export model
+int k_bits = 15; // discretize weight values into 2^{k_bits} integers.
+string model_str = NnIo::serialize(trainer, k_bits); // Print or save this string as needed.
+
+// Import model
+Inferrer loaded_inferrer = NnIo::deserialize(model_str); // Embed or load model string as needed.
+Trainer loaded_trainer(loaded_inferrer); // Trainer is a wrapper of Inferer. Use Trainer if code size isn't a concern.
+
+// Make inference
+loaded_inferrer.forward(reversi_board); 
+float predicted_win_rate = loaded_inferrer.get_prediction(0, 1); 
+float predicted_policy_prob_at_47 = loaded_inferrer.get_prediction(1, 47);
 
 ```
+
+It's a bit confusing to have Trainer and Inferrer. 
+I've split out Trainer out Inferrer so that Trainer code can removed on submission to save the code length. 
 

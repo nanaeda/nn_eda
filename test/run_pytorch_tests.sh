@@ -7,7 +7,7 @@ set -eux
 # 71: epoch=20, avg_prob=0.763363
 # 71: epoch=30, avg_prob=0.771592
 g++ pytorch_test.cpp -o pytorch_test -O3 -D LOCAL # -D_GLIBCXX_DEBUG -fsanitize=address
-# time ./pytorch_test
+time ./pytorch_test
 
 trap "rm -rf pytorch_test" EXIT SIGINT
 

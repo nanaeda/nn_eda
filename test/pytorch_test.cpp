@@ -44,7 +44,7 @@ int get_target(int dim)
   return rand() % dim;
 }
 
-double validate_model(Nn &nn, int dim, int n)
+double validate_model(Trainer &nn, int dim, int n)
 {
   srand(3456);
 
@@ -59,11 +59,11 @@ double validate_model(Nn &nn, int dim, int n)
   return avg_prob;
 }
 
-Nn train_model(vector<int> fc_widths, vector<int> head_widths, int num_epochs, int num_samples, int batch_size, double learning_rate)
+Trainer train_model(vector<int> fc_widths, vector<int> head_widths, int num_epochs, int num_samples, int batch_size, double learning_rate)
 {
   srand(2345);
 
-  Nn nn(fc_widths, head_widths);
+  Trainer nn(fc_widths, head_widths);
 
   rep(epoch, num_epochs){
     // validation

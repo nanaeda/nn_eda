@@ -640,17 +640,17 @@ public:
     string out_path = "nn_test_export.txt";
 
     vector<int> widths({4, 8, 8, 3});
-    nn_eda::Nn nn(widths);
+    Nn nn(widths);
 
     for (Batch batch: data) {
       nn.train_softmax(batch.inputs, batch.labels, learning_rate);
     }
 
-    nn_eda::NnIo::Obj io_obj = nn_eda::NnIo::to_obj(nn, encode_bits);
+    NnIo::Obj io_obj = NnIo::to_obj(nn, encode_bits);
     io_obj.write(out_path);
 
     // Copy-and-pasted from ${out_path}.
-    nn_eda::Nn loaded = nn_eda::NnIo::from_obj(nn_eda::NnIo::Obj(
+    Nn loaded = NnIo::from_obj(NnIo::Obj(
       std::vector<int>({4, 8, 8, 3, }),
       "㈪㊯㈠傷話啹년升뫆볮䄝麜맀亴蘫됧郄珩漲逫㥈籋非鸳䢠鶛檯膢㖗踁珤焝㦚抢缗憠們댤濄叆侣듬垖婕鑉鼲淞끵瓚髜寅奉册俗䲐戠卞鍿忓两띨燄烆鎰憤廨隮埉楻붶罦巌㌷仑粆齜茉㰉薇湺蒾跪柣琜瀻琜瀻琜瀻琜瀻琜瀻琜瀻琜瀻琜測",
       -0.73765462636947631836,

@@ -76,7 +76,7 @@ namespace nn_eda
       return w_offsets[i0] + i1 * ls[i0 + 1];
     }
 
-    float* forward(vf &v, bool is_sigmoid)
+    float* forward(vf &v)
     {
       assert(ls[0] == v.size());
 
@@ -112,9 +112,7 @@ namespace nn_eda
         }
       }
 
-      if(is_sigmoid){
-        FOR(i, ls.back()) last_out[i] = 1.0 / (1.0 + expf(-outs[b_offsets[ls.size() - 1] + i]));
-      }else{
+      {
         float maxi = outs[b_offsets[ls.size() - 1] + 0];
         FOR(i, ls.back()) maxi = max(maxi, outs[b_offsets[ls.size() - 1] + i]);
 
@@ -207,45 +205,12 @@ namespace nn_eda
       return *this;
     }
 
-    float* forward_sigmoid(vf &v)
-    { 
-      return forward(v, true);
-    }
-
-    float* forward_softmax(vf &v)
-    {
-      return forward(v, false);
-    }
-
-    double train_softmax(vvf inputs, vvf labels, double lr)
-    {
-      return train(inputs, labels, vf(), vi(), lr, false);
-    }
-
-    double train_sigmoid(vvf inputs, vf labels, vi actions, double lr)
-    {
-      return train(inputs, vvf(), labels, actions, lr, true);
-    }
-
     ~Nn()
     {
       free_memory();
     }
 
-  private:
-
-    float *grad_ws;
-    float *grad_bs;
-    float *grad_os;
-    float *momentum_ws;
-    float *momentum_bs;
-
-    double train(vvf inputs, 
-                 vvf labels, 
-                 vf sig_labels,
-                 vi sig_actions,
-                 double lr, 
-                 bool is_sigmoid)
+    double train(vvf inputs, vvf labels, double lr)
     {
       double norm = 1.0 / inputs.size();
       double momentum = 0.9;
@@ -259,20 +224,9 @@ namespace nn_eda
       FOR(input_index, inputs.size()){
         vf input = inputs[input_index];
 
-        float *forward_out = forward(input, is_sigmoid);
+        float *forward_out = forward(input);
 
-        if(is_sigmoid){
-          FOR(i, ls.back()){
-            float *g = grad_os + b_offsets[ls.size() - 1];
-            if(i == sig_actions[input_index]){
-              double label = sig_labels[input_index];
-              total_loss -= label * log(max(last_out[i], 1e-6f)) + (1 - label) * log(max(1 - last_out[i], 1e-6f));
-              g[i] = last_out[i] - label;
-            }else{
-              g[i] = 0;
-            }
-          }
-        }else{
+        {
           float *g = grad_os + b_offsets[ls.size() - 1];
           vf &label = labels[input_index];
           FOR(i, ls.back()){
@@ -362,6 +316,14 @@ namespace nn_eda
 
       return total_loss / inputs.size();
     }
+
+  private:
+
+    float *grad_ws;
+    float *grad_bs;
+    float *grad_os;
+    float *momentum_ws;
+    float *momentum_bs;
 
     void free_memory()
     {

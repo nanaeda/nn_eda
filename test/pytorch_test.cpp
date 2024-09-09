@@ -52,7 +52,7 @@ double validate_model(Nn &nn, int dim, int n)
   rep(loop, n){
     int target = get_target(dim);
     vector<float> input = gen_input(dim, target);
-    total_prob += nn.forward_softmax(input)[target];
+    total_prob += nn.forward(input)[target];
   }
   double avg_prob = total_prob / n;
   return avg_prob;
@@ -81,7 +81,7 @@ Nn train_model(vector<int> widths, int num_epochs, int num_samples, int batch_si
           inputs.push_back(gen_input(widths[0], target));
           labels.push_back(gen_label(widths[0], target));
         }
-        nn.train_softmax(inputs, labels, learning_rate);
+        nn.train(inputs, labels, learning_rate);
       }
     }
   }

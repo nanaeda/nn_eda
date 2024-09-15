@@ -157,10 +157,10 @@ namespace nn_eda
 
     void allocate_memory()
     {
-      b_offsets.push_back(0);
+      b_offsets = {0};
       FOR(i, all_widths.size()) b_offsets.push_back(b_offsets.back() + all_widths[i]);
 
-      w_offsets.push_back(0);
+      w_offsets = {0};
       FOR(i, all_widths.size() - 1) w_offsets.push_back(w_offsets.back() + all_widths[i] * all_widths[i + 1]);
 
       ws = new float[w_offsets.back()];
